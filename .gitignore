@@ -15,7 +15,7 @@ env/
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
+# *.ipynb — notebooks are tracked (removed blanket ignore)
 
 # Data & datasets (large binaries)
 *.zip
@@ -41,3 +41,5 @@ wandb/
 runs/
 outputs/
 checkpoints/
+# Allow PNGs inside checkpoints (loss curves, trajectory plots)
+!nuplan/checkpoints/*.png
