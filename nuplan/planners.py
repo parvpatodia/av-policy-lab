@@ -11,6 +11,8 @@ IDMPlanner     : Intelligent Driver Model AbstractPlanner wrapper
 DAggerPlanner  : DAgger data-collection wrapper around BCPlanner
 BEVPolicy      : CNN architecture (3×64×64 + 6) -> 48
 BEVPlanner     : BEV CNN AbstractPlanner wrapper (ego-history rasterization)
+MILEPolicy     : World model (encoder + GRU transition + policy), joint imitation+consistency loss
+MILEPlanner    : MILE AbstractPlanner wrapper (inference: state → encoder → latent → policy)
 """
 
 import sqlite3
@@ -556,6 +558,155 @@ class BEVPlanner(AbstractPlanner):
                 rear_axle_acceleration_2d=StateVector2D(ax, ay),
                 tire_steering_angle=0.0,
                 time_point=TimePoint(t0 + int((j + 1) * _BEV_DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
+        return InterpolatedTrajectory(states)
+
+
+# ── MILE World Model ──────────────────────────────────────────────────────────
+
+_MILE_LATENT = 64
+_MILE_FUTURE = 16
+
+
+class MILEPolicy(nn.Module):
+    """
+    MILE-inspired world model policy.
+    REF: Hu et al. (2022) "Model-Based Imitation Learning for Urban Driving."
+         NeurIPS 2022. arXiv:2209.14430
+
+    Components trained jointly:
+      Encoder     : 6 → 128 → 64   (state → latent z, with LayerNorm)
+      World model : GRUCell(64+3, 64)  (z_t + action_t → z_{t+1})
+      Policy      : 64 → 128 → 256 → 48  (z_t → trajectory)
+
+    Training objective:
+      L = L_imitation + BETA * L_consistency
+      L_imitation  = MSE(policy(z_t), traj_gt)
+      L_consistency = mean_j MSE(world_model(z_j, a_j), encoder(state_{t+j+1}))
+      — teacher forcing: a_j = GT action at step j (prevents circular dependency)
+
+    Inference path:
+      state → encode → z → policy → trajectory
+      (world model not used at inference)
+
+    Parameters: ~73K  (BC MLP: ~260K)
+    """
+
+    def __init__(
+        self,
+        state_dim:  int = 6,
+        latent_dim: int = _MILE_LATENT,
+        act_dim:    int = 3,
+        out_dim:    int = _MILE_FUTURE * 3,
+    ):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(state_dim,  128), nn.ReLU(inplace=True),
+            nn.Linear(128, latent_dim),
+            nn.LayerNorm(latent_dim),
+            # WHY LayerNorm: prevents consistency loss from collapsing all z → 0
+        )
+        # WHY GRUCell (not full GRU module): manual rollout needed to accumulate
+        # per-step consistency loss with teacher-forcing actions.
+        self.world_model = nn.GRUCell(latent_dim + act_dim, latent_dim)
+        self.policy = nn.Sequential(
+            nn.Linear(latent_dim, 128), nn.ReLU(inplace=True),
+            nn.Linear(128, 256),        nn.ReLU(inplace=True),
+            nn.Linear(256, out_dim),
+        )
+
+    def encode(self, state: torch.Tensor) -> torch.Tensor:
+        return self.encoder(state)
+
+    def step_world(self, z: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        return self.world_model(torch.cat([z, action], dim=-1), z)
+
+    def predict_trajectory(self, z: torch.Tensor) -> torch.Tensor:
+        return self.policy(z)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        """Inference: state (B,6) → trajectory (B,48)."""
+        return self.predict_trajectory(self.encode(state))
+
+
+class MILEPlanner(AbstractPlanner):
+    """
+    AbstractPlanner wrapper for MILEPolicy.
+    Inference path: state → encoder → latent → policy → trajectory.
+    The world model (GRUCell) is used only during training — not at inference.
+
+    This is structurally identical to BCPlanner; the difference is the
+    internal architecture (encoder + latent + policy vs flat MLP) and the
+    normalization stats (S_mean/S_std vs X_mean/X_std naming).
+    """
+
+    def __init__(self, ckpt_path: str):
+        self._ckpt_path = ckpt_path
+        self._device    = torch.device('cpu')
+        self._model: Optional[MILEPolicy] = None
+        self._S_mean = self._S_std = None
+        self._T_mean = self._T_std = None
+
+    def name(self) -> str:
+        return 'MILEPlanner'
+
+    def observation_type(self):
+        return DetectionsTracks
+
+    def initialize(self, initialization: PlannerInitialization) -> None:
+        ckpt = torch.load(self._ckpt_path, map_location=self._device, weights_only=False)
+        self._model = MILEPolicy().to(self._device)
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
+        self._S_mean = torch.tensor(ckpt['S_mean'], dtype=torch.float32)
+        self._S_std  = torch.tensor(ckpt['S_std'],  dtype=torch.float32)
+        self._T_mean = ckpt['T_mean']
+        self._T_std  = ckpt['T_std']
+
+    def _ego_features(self, ego: EgoState) -> np.ndarray:
+        h   = ego.rear_axle.heading
+        dcs = ego.dynamic_car_state
+        return np.array([
+            np.sin(h), np.cos(h),
+            dcs.rear_axle_velocity_2d.x,
+            dcs.rear_axle_velocity_2d.y,
+            dcs.rear_axle_acceleration_2d.x,
+            dcs.rear_axle_acceleration_2d.y,
+        ], dtype=np.float32)
+
+    def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
+        ego  = current_input.history.current_state[0]
+        feat = self._ego_features(ego)
+        x_t  = torch.tensor(
+            (feat - self._S_mean.numpy()) / self._S_std.numpy(),
+            dtype=torch.float32,
+        ).unsqueeze(0)
+        with torch.no_grad():
+            pred_norm = self._model(x_t).squeeze(0).numpy()
+        pred = (pred_norm * self._T_std + self._T_mean).reshape(_MILE_FUTURE, 3)
+
+        cx, cy    = ego.rear_axle.x, ego.rear_axle.y
+        heading   = ego.rear_axle.heading
+        cos_h, sin_h = np.cos(heading), np.sin(heading)
+        dcs = ego.dynamic_car_state
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
+
+        states = [ego]
+        for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = cx + cos_h * dx_e - sin_h * dy_e
+            wy    = cy + sin_h * dx_e + cos_h * dy_e
+            w_yaw = heading + d_yaw
+            states.append(EgoState.build_from_rear_axle(
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
+                rear_axle_velocity_2d=StateVector2D(vx, vy),
+                rear_axle_acceleration_2d=StateVector2D(ax, ay),
+                tire_steering_angle=0.0,
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
                 vehicle_parameters=ego.car_footprint.vehicle_parameters,
             ))
         return InterpolatedTrajectory(states)
