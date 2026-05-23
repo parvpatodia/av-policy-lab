@@ -36,8 +36,8 @@ Evaluated on 2,000 randomly sampled windows from the held-out val split (80/10/1
 | BC MLP | 0.058 | 0.063 | 6→256→256→256→48, 260K windows |
 | IDM (free-road) | 3.898 | 7.871 | Treiber 2000, V0=15 m/s |
 | Constant velocity | 3.205 | 6.030 | vx/vy extrapolated |
-| BEV CNN | (run bev_cnn.ipynb) | — | 3×64×64 ego-history + 6-dim state, ~370K params |
-| MILE world model | (run mile_policy.ipynb) | — | encoder + GRU + policy, ~73K params |
+| BEV CNN | 0.051 | 0.059 | 3×64×64 ego-history + 6-dim state, ~370K params; LR decayed 1e-3→2.5e-4 |
+| MILE world model | 0.060 | 0.068 | encoder+GRU+policy, ~73K params; L_cons=0.006 (converged) |
 
 ### Closed-loop (nuPlan L2 error, ego-vs-expert, 3 scenarios)
 
@@ -49,10 +49,14 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`.
 | BCPlanner (v1, DAgger iter 1) | 49.470 | 104.656 | 91.564 | 745 samples (0.3%) — no improvement |
 | BCPlanner (v2, DAgger iter 2) | (run dagger.ipynb) | — | — | ~15K samples (5.7%) — expected 30-60% reduction |
 | IDMPlanner | **6.285** | **24.308** | **15.733** | reactive, no learning |
-| BEVPlanner | (run bev_cnn.ipynb) | — | — | spatial history |
-| MILEPlanner | (run mile_policy.ipynb) | — | — | world model consistency |
+| BEVPlanner | (run closed_loop_eval.py) | — | — | spatial history; checkpoint ready |
+| MILEPlanner | (run closed_loop_eval.py) | — | — | world model consistency; checkpoint ready |
 
 **Key finding — covariate shift:** BC achieves 0.058m open-loop ADE (predicting from ground-truth states) but 49.4m closed-loop L2 (850x worse). Error compounds at every step because the model was never trained on states it caused itself.
+
+**BEV CNN open-loop:** Matches BC exactly (0.051m ADE). Spatial history adds marginal FDE improvement (-6.3%, 0.059 vs 0.063m). Open-loop ADE is not where BEV wins — the BC 6-dim state already captures velocity well for short-horizon prediction. The BEV advantage is expected in closed-loop, where spatial history aids recovery from compounding drift.
+
+**MILE open-loop:** 0.060m ADE — 3% worse than BC, as expected (smaller policy head: 64-dim latent vs BC's 256-dim hidden). World model converged cleanly: L_cons=0.006, step-1 latent error=0.0014 growing monotonically to 0.0084 at step-16. No overfitting (val/train=1.01x). Closed-loop advantage pending.
 
 **DAgger iter 1 failure:** 745 on-policy samples (0.3% of dataset) — the expert gradient overwhelmed the on-policy correction signal. Fix: iter 2 collects from 20 logs × 5 scenarios ≈ 15K samples (5.7%).
 
