@@ -38,9 +38,19 @@ Evaluated on 2,000 randomly sampled windows from the held-out val split (80/10/1
 | MILE world model | in progress | in progress | |
 | VLA (language-conditioned) | in progress | in progress | |
 
-### Closed-loop (PDM-Score)
+### Closed-loop (nuPlan L2 error, ego-vs-expert, 3 scenarios)
 
-Coming in Phase 2 (June 2026).
+Scenarios: `near_high_speed_vehicle`, `high_magnitude_speed`, `stationary_in_traffic`.  
+Controller: `perfect_tracking_controller`. Observation: `box_observation`.
+
+| Policy | Avg L2 (m) | Max L2 (m) | p90 L2 (m) | Mean Speed (m/s) |
+|---|---|---|---|---|
+| BCPlanner | 49.449 | 104.614 | 91.526 | 7.516 |
+| IDMPlanner | **6.285** | **24.308** | **15.733** | **7.152** |
+
+**Key finding — covariate shift:** BC achieves 0.058m open-loop ADE (predicting from ground-truth states) but 49.4m closed-loop L2 (850x worse). In closed-loop, the ego deviates from the training distribution at the first step and the error compounds at every subsequent step because the model was never trained on states it caused itself. IDM adapts its speed reactively to road conditions and stays 8x closer to the expert trajectory despite having no learned component.
+
+This is the core failure mode of behavior cloning on driving tasks — and the motivation for DAGGER, IRL, and world-model-based approaches (Phase 2).
 
 ---
 
