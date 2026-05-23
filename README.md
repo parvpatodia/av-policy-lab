@@ -28,14 +28,15 @@ nuPlan uses 1200+ hours of real Motional driving logs across Las Vegas, Boston, 
 
 ### Open-loop (ADE / FDE on nuPlan mini val split)
 
-| Policy | ADE (m) | FDE (m) |
-|---|---|---|
-| BC MLP | — | — |
-| Constant velocity | — | — |
-| MILE world model | in progress | in progress |
-| VLA (language-conditioned) | in progress | in progress |
+Evaluated on 2,000 randomly sampled windows from the held-out val split (80/10/10 split, seed 42). All planners receive the same initial ego state. IDM runs in free-road mode (no agent observations) for a fair comparison to BC, which also uses only ego state.
 
-*BC numbers will be filled in after closed-loop eval is complete.*
+| Policy | ADE (m) | FDE (m) | Notes |
+|---|---|---|---|
+| BC MLP | 0.058 | 0.063 | 6→256→256→256→48, 260K windows |
+| IDM (free-road) | 3.898 | 7.871 | Treiber 2000, V0=15 m/s, longitudinal only |
+| Constant velocity | 3.205 | 6.030 | vx/vy extrapolated, no heading change |
+| MILE world model | in progress | in progress | |
+| VLA (language-conditioned) | in progress | in progress | |
 
 ### Closed-loop (PDM-Score)
 
