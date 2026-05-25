@@ -52,6 +52,8 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`.
 | BEVPlanner | 49.410 | 104.543 | 91.416 | **–0.08% vs BC_v0** — spatial history negligible at this drift scale |
 | MILEPlanner | 49.565 | 104.834 | 91.723 | +0.2% vs BC_v0 — world model adds no recovery |
 | **GoalBCPlanner** | **1.820** | **2.944** | **2.646** | **–96.3% vs BC_v0, 3.5× better than IDM** — goal waypoint (T+8, expert) |
+| MapBCPlanner (v1, naive) | 56.326 | 108.124 | 98.831 | +13.8% vs BC_v0 — nearest-lane goal pointed backward |
+| MapBCPlanner (v2, heading-aligned) | 56.326 | 108.124 | 98.831 | identical — ego drifts beyond 30m map query radius, fallback fires |
 
 **Key finding — covariate shift:** BC achieves 0.058m open-loop ADE (predicting from ground-truth states) but 49.4m closed-loop L2 (850x worse). Error compounds at every step because the model was never trained on states it caused itself.
 
@@ -63,7 +65,11 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`.
 
 **Central finding (Phase 2):** all three architecture variants (BC MLP, BEV CNN, MILE world model) plateau at ~49.4–49.6m closed-loop L2. IDM (6.285m) wins by 8×. Lesson: representation does not fix perception absence.
 
-**Central finding (Phase 3a — GoalBC):** Adding a 2D goal waypoint (T+8 expert position in ego-frame) to the 6-dim input reduces closed-loop L2 from 49.486m → **1.820m — a 96.3% reduction**. GoalBC (1.820m) is **3.5× better than IDM** (6.285m). The MLP policy was never the bottleneck — it was operating without any spatial reference to the road. The 6-dim kinematic state looks identical whether the ego is on-road or 50m off-track. Two extra dimensions of goal information completely breaks the plateau. Phase 3b (MapBC) tests whether the same gain holds when the goal comes from road centerline (no expert required at inference).
+**Central finding (Phase 3a — GoalBC):** Adding a 2D goal waypoint (T+8 expert position in ego-frame) to the 6-dim input reduces closed-loop L2 from 49.486m → **1.820m — a 96.3% reduction**. GoalBC (1.820m) is **3.5× better than IDM** (6.285m). The MLP policy was never the bottleneck — it was operating without any spatial reference to the road. The 6-dim kinematic state looks identical whether the ego is on-road or 50m off-track. Two extra dimensions of goal information completely breaks the plateau.
+
+**Phase 3b (MapBC) finding — the drift bootstrapping problem:** MapBC replaces the expert T+8 goal with a road centerline look-ahead from the HD map. Both naive (v1, nearest-lane) and heading-aligned (v2) selection score 56.326m — worse than BC_v0. Root cause: once the ego accumulates 2–3m of compounding drift, `get_proximal_map_objects(radius=30m)` returns zero lanes and the planner falls back to straight-ahead. The map query is only useful *on the road*; it fails for recovery. GoalBC succeeds because the expert's T+8 position is valid regardless of where the ego currently is — it's a global reference. The map query is a local reference that breaks under the very drift it's supposed to fix.
+
+**Implication for Phase 3c:** a deployable goal source must either (a) pre-compute a route at scenario start and track position along it globally (like IDM's reference path), or (b) use a learned goal proposer trained on off-road recovery examples. Pure point-based map queries are insufficient.
 
 ---
 

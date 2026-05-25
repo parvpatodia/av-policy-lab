@@ -34,6 +34,7 @@ CKPT_BC_V2  = str(_CKPT_ROOT / 'bc_dagger_v2.pt')     # DAgger iter 2 (~15K samp
 CKPT_BEV    = str(_CKPT_ROOT / 'bev_cnn.pt')          # BEV CNN
 CKPT_MILE   = str(_CKPT_ROOT / 'mile_policy.pt')      # MILE world model
 CKPT_GOALBC = str(_CKPT_ROOT / 'goal_bc.pt')          # Phase 3a: Goal-conditioned BC
+CKPT_MAPBC  = str(_CKPT_ROOT / 'goal_bc.pt')          # Phase 3b: MapBC reuses GoalBC weights
 DB_DIR      = '/Users/parvpatodia/nuplan-devkit/data/cache/mini'
 # WHY: GoalBCPlanner needs a specific DB file to build expert T+8 lookup.
 # We use the first sorted DB file — same log as the simulation scenarios.
@@ -82,7 +83,7 @@ def run_simulation(planner, save_dir: str, n_scenarios: int = 3):
 
 
 if __name__ == '__main__':
-    from planners import BCPlanner, IDMPlanner, BEVPlanner, MILEPlanner, GoalBCPlanner
+    from planners import BCPlanner, IDMPlanner, BEVPlanner, MILEPlanner, GoalBCPlanner, MapBCPlanner
 
     Path(SAVE_DIR).mkdir(exist_ok=True)
 
@@ -120,3 +121,13 @@ if __name__ == '__main__':
     else:
         print(f'[SKIP] GoalBCPlanner — checkpoint not found: {CKPT_GOALBC}')
         print(f'       Run goal_bc.ipynb Cells 1-5 first.')
+
+    # ── MapBC (Phase 3b) — centerline goal, no expert at inference ────────
+    # WHY reuse goal_bc.pt: MapBC and GoalBC have identical training (same data,
+    # same architecture, same T+8 expert goals). Only inference differs.
+    # MapBCPlanner uses nuPlan map_api (injected via initialize()) for goal.
+    if Path(CKPT_MAPBC).exists():
+        run_simulation(MapBCPlanner(CKPT_MAPBC), SAVE_DIR, n_scenarios=3)
+    else:
+        print(f'[SKIP] MapBCPlanner — checkpoint not found: {CKPT_MAPBC}')
+        print(f'       Run goal_bc.ipynb Cells 1-5 first (shares goal_bc.pt).')

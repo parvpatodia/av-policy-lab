@@ -13,6 +13,9 @@ BEVPolicy      : CNN architecture (3×64×64 + 6) -> 48
 BEVPlanner     : BEV CNN AbstractPlanner wrapper (ego-history rasterization)
 MILEPolicy     : World model (encoder + GRU transition + policy), joint imitation+consistency loss
 MILEPlanner    : MILE AbstractPlanner wrapper (inference: state → encoder → latent → policy)
+GoalBCPolicy   : Goal-conditioned MLP (8 -> 256 -> 256 -> 256 -> 48, state + T+8 expert waypoint)
+GoalBCPlanner  : GoalBC wrapper — expert DB lookup for goal at inference (Phase 3a)
+MapBCPlanner   : GoalBC weights + road centerline goal at inference — no expert required (Phase 3b)
 GoalBCPolicy   : Goal-conditioned MLP (8 -> 256 -> 256 -> 256 -> 48), adds T+8 waypoint to input
 GoalBCPlanner  : GoalBC AbstractPlanner wrapper with expert T+8 goal lookup
 """
@@ -851,3 +854,173 @@ class GoalBCPlanner(AbstractPlanner):
                 vehicle_parameters=ego.car_footprint.vehicle_parameters,
             ))
         return InterpolatedTrajectory(states)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3b — MapBCPlanner
+# ---------------------------------------------------------------------------
+
+class MapBCPlanner(AbstractPlanner):
+    """
+    MapBC: GoalBC weights at inference with road-centerline goal (no expert).
+
+    WHY reuse GoalBCPolicy weights (goal_bc.pt):
+      MapBC and GoalBC share identical training data and architecture. Both use
+      [state(6) + goal(2)] = 8-dim input at training time with expert T+8 goals.
+      The trained weights are therefore identical. The ONLY difference is inference:
+        GoalBCPlanner  -> goal from expert DB lookup (T+8 expert position)
+        MapBCPlanner   -> goal from road centerline (nuPlan map look-ahead)
+      This cleanly isolates the effect of goal SOURCE on closed-loop performance.
+      Any L2 gap between GoalBC (1.820m) and MapBC is purely due to how closely
+      the map centerline approximates the expert T+8 position.
+
+    At deployment: MapBCPlanner needs only a checkpoint + HD map. No expert data
+    required at runtime -- this is a fully deployable policy.
+    """
+
+    def __init__(self, checkpoint_path: str, look_ahead_m: float = 8.0) -> None:
+        self._look_ahead_m = look_ahead_m
+        self._map_api      = None    # injected by nuPlan via initialize()
+
+        ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+        self._model = GoalBCPolicy().to('cpu')
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
+        self._X_mean = torch.tensor(ckpt['X_mean'], dtype=torch.float32)
+        self._X_std  = torch.tensor(ckpt['X_std'],  dtype=torch.float32)
+        self._Y_mean = ckpt['Y_mean']
+        self._Y_std  = ckpt['Y_std']
+
+    def name(self) -> str:
+        return 'MapBCPlanner'
+
+    def observation_type(self):
+        from nuplan.planning.simulation.observation.observation_type import DetectionsTracks
+        return DetectionsTracks
+
+    def initialize(self, initialization) -> None:
+        # WHY store map_api here: nuPlan injects the scenario map_api via initialize().
+        # This gives real-time map access without a DB path and automatically uses
+        # the correct city map for each scenario.
+        self._map_api = initialization.map_api
+
+    def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
+        ego = current_input.history.current_state[0]
+        x_g = ego.rear_axle.x
+        y_g = ego.rear_axle.y
+        yaw = ego.rear_axle.heading
+        dcs = ego.dynamic_car_state
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
+
+        # Get centerline goal from HD map -- no expert data required
+        dx_goal, dy_goal = self._get_map_goal(x_g, y_g, yaw)
+
+        feat = torch.tensor(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal],
+            dtype=torch.float32,
+        )
+        feat_norm = (feat - self._X_mean) / self._X_std
+
+        with torch.no_grad():
+            pred_norm = self._model(feat_norm.unsqueeze(0)).squeeze(0).numpy()
+        pred = (pred_norm * self._Y_std + self._Y_mean).reshape(FUTURE_STEPS, 3)
+
+        cos_h = np.cos(yaw)
+        sin_h = np.sin(yaw)
+        states = [ego]
+        for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
+            states.append(EgoState.build_from_rear_axle(
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
+                rear_axle_velocity_2d=StateVector2D(vx, vy),
+                rear_axle_acceleration_2d=StateVector2D(ax, ay),
+                tire_steering_angle=0.0,
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
+        return InterpolatedTrajectory(states)
+
+    def _get_map_goal(self, x: float, y: float, yaw: float) -> Tuple[float, float]:
+        """Query nuPlan map_api for look-ahead centerline goal in ego-frame."""
+        from nuplan.common.maps.maps_datatypes import SemanticMapLayer
+        from nuplan.common.actor_state.state_representation import Point2D
+
+        FALLBACK = (float(self._look_ahead_m), 0.0)   # straight-ahead in ego-frame
+
+        if self._map_api is None:
+            return FALLBACK
+
+        try:
+            result = self._map_api.get_proximal_map_objects(
+                Point2D(x, y), radius=30.0, layers=[SemanticMapLayer.LANE]
+            )
+            lanes = result[SemanticMapLayer.LANE]
+        except Exception:
+            # WHY broad except: ego may drift outside mapped region during
+            # compounding error. Fallback keeps simulation running cleanly.
+            return FALLBACK
+
+        if not lanes:
+            return FALLBACK
+
+        # Select lane by heading-weighted distance (v2 fix).
+        # WHY: naive nearest-centerline (v1) scored 56.3m — WORSE than BC_v0 (49.5m).
+        # Root cause: at intersections / after drift the closest lane tangent was
+        # anti-aligned with ego heading, so the look-ahead goal pointed BACKWARD.
+        # Fix: penalise lanes whose tangent at the closest point opposes ego heading.
+        # Score = dist + 30 * heading_penalty, where heading_penalty = max(0, -cos_angle).
+        # A lane pointing directly backward gets +30m penalty (≈ the search radius),
+        # effectively excluding it unless no forward-aligned lane exists within 30m.
+        ego_dir = np.array([np.cos(yaw), np.sin(yaw)])
+        best_lane, best_score = None, float('inf')
+        for lane in lanes:
+            try:
+                cl_pts  = np.array([(s.x, s.y) for s in lane.baseline_path.discrete_path])
+                dists_l = np.linalg.norm(cl_pts - np.array([x, y]), axis=1)
+                i0_l    = int(np.argmin(dists_l))
+                d       = float(dists_l[i0_l])
+                i_next  = min(i0_l + 1, len(cl_pts) - 1)
+                tangent = cl_pts[i_next] - cl_pts[i0_l]
+                t_norm  = float(np.linalg.norm(tangent))
+                if t_norm > 1e-6:
+                    cos_a           = float(np.dot(tangent / t_norm, ego_dir))
+                    heading_penalty = max(0.0, -cos_a)
+                else:
+                    heading_penalty = 0.0
+                score = d + 30.0 * heading_penalty
+                if score < best_score:
+                    best_score, best_lane = score, lane
+            except Exception:
+                continue
+
+        if best_lane is None:
+            return FALLBACK
+
+        cl    = np.array([(s.x, s.y) for s in best_lane.baseline_path.discrete_path])
+        dists = np.linalg.norm(cl - np.array([x, y]), axis=1)
+        i0    = int(np.argmin(dists))
+
+        # Walk look_ahead_m along centerline from closest point
+        cum    = 0.0
+        i_goal = min(i0 + 1, len(cl) - 1)
+        for i in range(i0, len(cl) - 1):
+            cum += float(np.linalg.norm(cl[i + 1] - cl[i]))
+            if cum >= self._look_ahead_m:
+                i_goal = i + 1
+                break
+        else:
+            i_goal = len(cl) - 1
+
+        gx, gy  = cl[i_goal]
+        cos_neg = np.cos(-yaw)
+        sin_neg = np.sin(-yaw)
+        return (
+            float(cos_neg * (gx - x) - sin_neg * (gy - y)),
+            float(sin_neg * (gx - x) + cos_neg * (gy - y)),
+        )
