@@ -13,6 +13,8 @@ BEVPolicy      : CNN architecture (3×64×64 + 6) -> 48
 BEVPlanner     : BEV CNN AbstractPlanner wrapper (ego-history rasterization)
 MILEPolicy     : World model (encoder + GRU transition + policy), joint imitation+consistency loss
 MILEPlanner    : MILE AbstractPlanner wrapper (inference: state → encoder → latent → policy)
+GoalBCPolicy   : Goal-conditioned MLP (8 -> 256 -> 256 -> 256 -> 48), adds T+8 waypoint to input
+GoalBCPlanner  : GoalBC AbstractPlanner wrapper with expert T+8 goal lookup
 """
 
 import sqlite3
@@ -701,6 +703,145 @@ class MILEPlanner(AbstractPlanner):
             wx    = cx + cos_h * dx_e - sin_h * dy_e
             wy    = cy + sin_h * dx_e + cos_h * dy_e
             w_yaw = heading + d_yaw
+            states.append(EgoState.build_from_rear_axle(
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
+                rear_axle_velocity_2d=StateVector2D(vx, vy),
+                rear_axle_acceleration_2d=StateVector2D(ax, ay),
+                tire_steering_angle=0.0,
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
+        return InterpolatedTrajectory(states)
+
+
+# ── Goal-conditioned BC ───────────────────────────────────────────────────────
+
+class GoalBCPolicy(nn.Module):
+    """
+    Goal-conditioned BC policy.
+    Input : [sin(yaw), cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal]  (8-dim)
+    Output: [(dx, dy, d_yaw) x 16]                                  (48-dim, ego-frame)
+
+    Ablation over BCPolicy: everything identical except 2 additional goal features.
+    WHY goal = T+8 waypoint: 0.8s horizon gives the policy enough road context
+    to anticipate upcoming curves without leaking far-future expert trajectory.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(8, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, 48),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class GoalBCPlanner(AbstractPlanner):
+    """
+    Goal-conditioned BC planner.
+    Wraps GoalBCPolicy with expert T+8 waypoint lookup from the nuPlan DB.
+
+    WHY expert goal at inference: this is an honest upper-bound eval.
+    We test "given correct goal, can the policy execute road-following?"
+    If closed-loop L2 drops significantly vs BCPlanner, the root cause of
+    Phase 2 plateau is confirmed: the policy can execute when given directional
+    guidance. If L2 stays flat, the bottleneck is control precision.
+    """
+
+    def __init__(self, checkpoint_path: str, db_path: str):
+        # WHY db_path: we look up the expert T+8 waypoint from the DB at each planning step.
+        self._ckpt_path = checkpoint_path
+        self._db_path   = db_path
+        self._device    = torch.device('cpu')   # WHY: CPU for sim stability on macOS MPS
+        self._model: Optional[GoalBCPolicy] = None
+        self._X_mean = self._X_std = None
+        self._Y_mean = self._Y_std = None
+        self._expert: dict = {}       # timestamp_us -> (x, y, yaw)
+        self._sorted_ts: List[int] = []
+
+    def name(self) -> str:
+        return 'GoalBCPlanner'
+
+    def observation_type(self):
+        return DetectionsTracks
+
+    def initialize(self, initialization: PlannerInitialization) -> None:
+        # Load model weights
+        ckpt = torch.load(self._ckpt_path, map_location=self._device, weights_only=False)
+        self._model = GoalBCPolicy().to(self._device)
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
+        self._X_mean = torch.tensor(ckpt['X_mean'], dtype=torch.float32)
+        self._X_std  = torch.tensor(ckpt['X_std'],  dtype=torch.float32)
+        self._Y_mean = ckpt['Y_mean']
+        self._Y_std  = ckpt['Y_std']
+
+        # Build expert timestamp lookup from DB
+        # WHY: pre-load at initialize() not __init__ to avoid DB connection before simulation
+        self._build_expert_lookup()
+
+    def _build_expert_lookup(self) -> None:
+        """Pre-load ego_pose table as {timestamp_us -> (x, y, yaw)}."""
+        con  = sqlite3.connect(self._db_path)
+        rows = con.execute(
+            'SELECT timestamp, x, y, qw, qx, qy, qz FROM ego_pose ORDER BY timestamp'
+        ).fetchall()
+        con.close()
+        for ts, x, y, qw, qx, qy, qz in rows:
+            yaw = np.arctan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy ** 2 + qz ** 2))
+            self._expert[int(ts)] = (x, y, yaw)
+        self._sorted_ts = sorted(self._expert.keys())
+
+    def _get_expert_at_offset(self, current_ts_us: int, offset_steps: int = 8) -> Tuple[float, float, float]:
+        """Return expert (x, y, yaw) at current_ts + offset_steps * 100ms."""
+        target_ts = current_ts_us + offset_steps * 100_000   # WHY: nuPlan 10Hz -> 100ms/step
+        idx = int(np.searchsorted(self._sorted_ts, target_ts))
+        idx = min(idx, len(self._sorted_ts) - 1)
+        return self._expert[self._sorted_ts[idx]]
+
+    def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
+        ego    = current_input.history.current_state[0]
+        x_g    = ego.rear_axle.x
+        y_g    = ego.rear_axle.y
+        yaw    = ego.rear_axle.heading
+        dcs    = ego.dynamic_car_state
+        vx     = dcs.rear_axle_velocity_2d.x
+        vy     = dcs.rear_axle_velocity_2d.y
+        ax     = dcs.rear_axle_acceleration_2d.x
+        ay     = dcs.rear_axle_acceleration_2d.y
+        ts     = int(ego.time_point.time_us)
+        t0     = ego.time_point.time_us
+
+        # Get T+8 goal position from expert DB, transform to ego-frame
+        gx, gy, _ = self._get_expert_at_offset(ts, offset_steps=8)
+        cos_neg_yaw = np.cos(-yaw)
+        sin_neg_yaw = np.sin(-yaw)
+        dx_w    = gx - x_g
+        dy_w    = gy - y_g
+        dx_goal = cos_neg_yaw * dx_w - sin_neg_yaw * dy_w
+        dy_goal = sin_neg_yaw * dx_w + cos_neg_yaw * dy_w
+
+        feat = torch.tensor(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal],
+            dtype=torch.float32,
+        )
+        feat_norm = (feat - self._X_mean) / self._X_std
+
+        with torch.no_grad():
+            pred_norm = self._model(feat_norm.unsqueeze(0)).squeeze(0).numpy()
+        pred = (pred_norm * self._Y_std + self._Y_mean).reshape(FUTURE_STEPS, 3)
+
+        cos_h, sin_h = np.cos(yaw), np.sin(yaw)
+
+        states = [ego]
+        for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
             states.append(EgoState.build_from_rear_axle(
                 rear_axle_pose=StateSE2(wx, wy, w_yaw),
                 rear_axle_velocity_2d=StateVector2D(vx, vy),

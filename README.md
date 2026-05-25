@@ -51,6 +51,7 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`.
 | IDMPlanner | **6.285** | **24.308** | **15.733** | reactive, no learning |
 | BEVPlanner | 49.410 | 104.543 | 91.416 | **–0.08% vs BC_v0** — spatial history negligible at this drift scale |
 | MILEPlanner | 49.565 | 104.834 | 91.723 | +0.2% vs BC_v0 — world model adds no recovery |
+| **GoalBCPlanner** | **1.820** | **2.944** | **2.646** | **–96.3% vs BC_v0, 3.5× better than IDM** — goal waypoint (T+8, expert) |
 
 **Key finding — covariate shift:** BC achieves 0.058m open-loop ADE (predicting from ground-truth states) but 49.4m closed-loop L2 (850x worse). Error compounds at every step because the model was never trained on states it caused itself.
 
@@ -60,7 +61,9 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`.
 
 **DAgger iter 2 failure (architectural limit):** 12,678 on-policy samples (4.6%) — BC_v2 val loss improved (0.245→0.243) but closed-loop L2 unchanged (49.449→49.486m, ~0%). Root cause: the MLP policy (6-dim state) cannot perceive where it is relative to the road. More data doesn't fix perception.
 
-**Central finding:** all three learned policies plateau at ~49.4–49.6m closed-loop L2 regardless of architecture. IDM (6.285m) wins by 8x without any learning because it is *reactive to road geometry* — it has a speed model and gap model that clamp the ego to safe behavior. The imitation policies have none of this. The lesson: for covariate shift recovery, feedback matters more than representation.
+**Central finding (Phase 2):** all three architecture variants (BC MLP, BEV CNN, MILE world model) plateau at ~49.4–49.6m closed-loop L2. IDM (6.285m) wins by 8×. Lesson: representation does not fix perception absence.
+
+**Central finding (Phase 3a — GoalBC):** Adding a 2D goal waypoint (T+8 expert position in ego-frame) to the 6-dim input reduces closed-loop L2 from 49.486m → **1.820m — a 96.3% reduction**. GoalBC (1.820m) is **3.5× better than IDM** (6.285m). The MLP policy was never the bottleneck — it was operating without any spatial reference to the road. The 6-dim kinematic state looks identical whether the ego is on-road or 50m off-track. Two extra dimensions of goal information completely breaks the plateau. Phase 3b (MapBC) tests whether the same gain holds when the goal comes from road centerline (no expert required at inference).
 
 ---
 

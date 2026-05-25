@@ -27,13 +27,18 @@ sys.path.insert(0, '/Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan')
 import hydra
 from tutorials.utils.tutorial_utils import construct_simulation_hydra_paths
 
-_CKPT_ROOT = Path('/Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan/checkpoints')
+_CKPT_ROOT  = Path('/Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan/checkpoints')
 CKPT_BC_V0  = str(_CKPT_ROOT / 'bc_best.pt')          # BC pure imitation
 CKPT_BC_V1  = str(_CKPT_ROOT / 'bc_dagger_v1.pt')     # DAgger iter 1 (745 samples)
 CKPT_BC_V2  = str(_CKPT_ROOT / 'bc_dagger_v2.pt')     # DAgger iter 2 (~15K samples)
 CKPT_BEV    = str(_CKPT_ROOT / 'bev_cnn.pt')          # BEV CNN
 CKPT_MILE   = str(_CKPT_ROOT / 'mile_policy.pt')      # MILE world model
+CKPT_GOALBC = str(_CKPT_ROOT / 'goal_bc.pt')          # Phase 3a: Goal-conditioned BC
 DB_DIR      = '/Users/parvpatodia/nuplan-devkit/data/cache/mini'
+# WHY: GoalBCPlanner needs a specific DB file to build expert T+8 lookup.
+# We use the first sorted DB file — same log as the simulation scenarios.
+_DB_FILES   = sorted(Path(DB_DIR).glob('*.db'))
+GOALBC_DB   = str(_DB_FILES[0]) if _DB_FILES else ''
 SAVE_DIR    = '/Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan/sim_results'
 LOG_NAME    = '2021.05.12.22.00.38_veh-35_01008_01518'
 
@@ -77,7 +82,7 @@ def run_simulation(planner, save_dir: str, n_scenarios: int = 3):
 
 
 if __name__ == '__main__':
-    from planners import BCPlanner, IDMPlanner, BEVPlanner, MILEPlanner
+    from planners import BCPlanner, IDMPlanner, BEVPlanner, MILEPlanner, GoalBCPlanner
 
     Path(SAVE_DIR).mkdir(exist_ok=True)
 
@@ -106,3 +111,12 @@ if __name__ == '__main__':
     else:
         print(f'[SKIP] MILEPlanner — checkpoint not found: {CKPT_MILE}')
         print(f'       Run mile_policy.ipynb Cells 2-7 first.')
+
+    # ── Goal-conditioned BC (Phase 3a) — skip if not yet trained ──────────
+    # WHY: GoalBCPlanner needs both the checkpoint and a DB path for the expert
+    #      T+8 goal lookup. GOALBC_DB uses the first sorted mini DB file.
+    if Path(CKPT_GOALBC).exists() and GOALBC_DB:
+        run_simulation(GoalBCPlanner(CKPT_GOALBC, GOALBC_DB), SAVE_DIR, n_scenarios=3)
+    else:
+        print(f'[SKIP] GoalBCPlanner — checkpoint not found: {CKPT_GOALBC}')
+        print(f'       Run goal_bc.ipynb Cells 1-5 first.')
