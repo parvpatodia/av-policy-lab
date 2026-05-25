@@ -47,20 +47,20 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`.
 |---|---|---|---|---|
 | BCPlanner (v0) | 49.449 | 104.614 | 91.526 | pure imitation |
 | BCPlanner (v1, DAgger iter 1) | 49.470 | 104.656 | 91.564 | 745 samples (0.3%) — no improvement |
-| BCPlanner (v2, DAgger iter 2) | (run dagger.ipynb) | — | — | ~15K samples (5.7%) — expected 30-60% reduction |
+| BCPlanner (v2, DAgger iter 2) | 49.486 | 104.689 | 91.593 | 12,678 samples (4.6%) — **no improvement** |
 | IDMPlanner | **6.285** | **24.308** | **15.733** | reactive, no learning |
-| BEVPlanner | (run closed_loop_eval.py) | — | — | spatial history; checkpoint ready |
-| MILEPlanner | (run closed_loop_eval.py) | — | — | world model consistency; checkpoint ready |
+| BEVPlanner | 49.410 | 104.543 | 91.416 | **–0.08% vs BC_v0** — spatial history negligible at this drift scale |
+| MILEPlanner | 49.565 | 104.834 | 91.723 | +0.2% vs BC_v0 — world model adds no recovery |
 
 **Key finding — covariate shift:** BC achieves 0.058m open-loop ADE (predicting from ground-truth states) but 49.4m closed-loop L2 (850x worse). Error compounds at every step because the model was never trained on states it caused itself.
 
-**BEV CNN open-loop:** Matches BC exactly (0.051m ADE). Spatial history adds marginal FDE improvement (-6.3%, 0.059 vs 0.063m). Open-loop ADE is not where BEV wins — the BC 6-dim state already captures velocity well for short-horizon prediction. The BEV advantage is expected in closed-loop, where spatial history aids recovery from compounding drift.
+**BEV CNN closed-loop:** 49.410m avg L2 vs BC_v0 49.449m — 0.08% improvement, essentially zero. The ego-history rasterization captures where the ego *has been*, not where the road *is*. Once the ego drifts 50m off-track, the 64×64 ego-centered window shows the ego's own off-road trajectory history — no road geometry, no recovery signal. Open-loop ADE improved (0.051m vs 0.058m for BC) because BEV adds useful short-horizon context from ground-truth states. Closed-loop that advantage evaporates immediately when off-distribution states begin.
 
-**MILE open-loop:** 0.060m ADE — 3% worse than BC, as expected (smaller policy head: 64-dim latent vs BC's 256-dim hidden). World model converged cleanly: L_cons=0.006, step-1 latent error=0.0014 growing monotonically to 0.0084 at step-16. No overfitting (val/train=1.01x). Closed-loop advantage pending.
+**MILE world model closed-loop:** 49.565m avg L2 — 0.2% *worse* than BC_v0. The GRU world model trained to minimize consistency loss between adjacent latent states. In distribution this works; in severe compounding drift the latent state encodes nonsense (no training examples for 50m off-track states) and the policy head produces arbitrary outputs. The consistency loss did not act as a regularizer sufficient to prevent off-distribution collapse.
 
-**DAgger iter 1 failure:** 745 on-policy samples (0.3% of dataset) — the expert gradient overwhelmed the on-policy correction signal. Fix: iter 2 collects from 20 logs × 5 scenarios ≈ 15K samples (5.7%).
+**DAgger iter 2 failure (architectural limit):** 12,678 on-policy samples (4.6%) — BC_v2 val loss improved (0.245→0.243) but closed-loop L2 unchanged (49.449→49.486m, ~0%). Root cause: the MLP policy (6-dim state) cannot perceive where it is relative to the road. More data doesn't fix perception.
 
-**MILE hypothesis:** joint encoder + GRU world model training forces the latent space to encode ego dynamics, not just mimic outputs. This should reduce covariate shift in closed-loop without requiring iterative data collection (DAgger).
+**Central finding:** all three learned policies plateau at ~49.4–49.6m closed-loop L2 regardless of architecture. IDM (6.285m) wins by 8x without any learning because it is *reactive to road geometry* — it has a speed model and gap model that clamp the ego to safe behavior. The imitation policies have none of this. The lesson: for covariate shift recovery, feedback matters more than representation.
 
 ---
 
