@@ -33,8 +33,11 @@ CKPT_BC_V1  = str(_CKPT_ROOT / 'bc_dagger_v1.pt')     # DAgger iter 1 (745 sampl
 CKPT_BC_V2  = str(_CKPT_ROOT / 'bc_dagger_v2.pt')     # DAgger iter 2 (~15K samples)
 CKPT_BEV    = str(_CKPT_ROOT / 'bev_cnn.pt')          # BEV CNN
 CKPT_MILE   = str(_CKPT_ROOT / 'mile_policy.pt')      # MILE world model
-CKPT_GOALBC = str(_CKPT_ROOT / 'goal_bc.pt')          # Phase 3a: Goal-conditioned BC
-CKPT_MAPBC  = str(_CKPT_ROOT / 'goal_bc.pt')          # Phase 3b: MapBC reuses GoalBC weights
+CKPT_GOALBC      = str(_CKPT_ROOT / 'goal_bc.pt')     # Phase 3a: Goal-conditioned BC
+CKPT_MAPBC       = str(_CKPT_ROOT / 'goal_bc.pt')     # Phase 3b: MapBC reuses GoalBC weights
+CKPT_ROUTEMAPBC  = str(_CKPT_ROOT / 'goal_bc.pt')     # Phase 3c: RouteMapBC reuses GoalBC weights
+# WHY reuse goal_bc.pt for RouteMapBC: same architecture (8→256→256→256→48) and training data.
+# Only inference differs: route pre-computed in initialize() instead of a live map query.
 DB_DIR      = '/Users/parvpatodia/nuplan-devkit/data/cache/mini'
 # WHY: GoalBCPlanner needs a specific DB file to build expert T+8 lookup.
 # We use the first sorted DB file — same log as the simulation scenarios.
@@ -83,7 +86,7 @@ def run_simulation(planner, save_dir: str, n_scenarios: int = 3):
 
 
 if __name__ == '__main__':
-    from planners import BCPlanner, IDMPlanner, BEVPlanner, MILEPlanner, GoalBCPlanner, MapBCPlanner
+    from planners import BCPlanner, IDMPlanner, BEVPlanner, MILEPlanner, GoalBCPlanner, MapBCPlanner, RouteMapBCPlanner
 
     Path(SAVE_DIR).mkdir(exist_ok=True)
 
@@ -130,4 +133,15 @@ if __name__ == '__main__':
         run_simulation(MapBCPlanner(CKPT_MAPBC), SAVE_DIR, n_scenarios=3)
     else:
         print(f'[SKIP] MapBCPlanner — checkpoint not found: {CKPT_MAPBC}')
+        print(f'       Run goal_bc.ipynb Cells 1-5 first (shares goal_bc.pt).')
+
+    # ── RouteMapBC (Phase 3c) — pre-computed global route, no expert ──────
+    # WHY: MapBC fails because live map queries return 0 lanes once ego drifts
+    # off-road (drift bootstrapping problem). RouteMapBC pre-computes a 200m route
+    # at initialize() time and tracks it globally — valid regardless of ego drift.
+    # Reuses goal_bc.pt (same weights, only goal source changes).
+    if Path(CKPT_ROUTEMAPBC).exists():
+        run_simulation(RouteMapBCPlanner(CKPT_ROUTEMAPBC), SAVE_DIR, n_scenarios=3)
+    else:
+        print(f'[SKIP] RouteMapBCPlanner — checkpoint not found: {CKPT_ROUTEMAPBC}')
         print(f'       Run goal_bc.ipynb Cells 1-5 first (shares goal_bc.pt).')

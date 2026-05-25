@@ -5,19 +5,18 @@ Import this module before running SimulationLog.load_data() so pickle finds the 
 
 Classes
 -------
-BCPolicy       : MLP architecture (6 -> 256 -> 256 -> 256 -> 48)
-BCPlanner      : Behavior-cloning AbstractPlanner wrapper
-IDMPlanner     : Intelligent Driver Model AbstractPlanner wrapper
-DAggerPlanner  : DAgger data-collection wrapper around BCPlanner
-BEVPolicy      : CNN architecture (3×64×64 + 6) -> 48
-BEVPlanner     : BEV CNN AbstractPlanner wrapper (ego-history rasterization)
-MILEPolicy     : World model (encoder + GRU transition + policy), joint imitation+consistency loss
-MILEPlanner    : MILE AbstractPlanner wrapper (inference: state → encoder → latent → policy)
-GoalBCPolicy   : Goal-conditioned MLP (8 -> 256 -> 256 -> 256 -> 48, state + T+8 expert waypoint)
-GoalBCPlanner  : GoalBC wrapper — expert DB lookup for goal at inference (Phase 3a)
-MapBCPlanner   : GoalBC weights + road centerline goal at inference — no expert required (Phase 3b)
-GoalBCPolicy   : Goal-conditioned MLP (8 -> 256 -> 256 -> 256 -> 48), adds T+8 waypoint to input
-GoalBCPlanner  : GoalBC AbstractPlanner wrapper with expert T+8 goal lookup
+BCPolicy          : MLP architecture (6 -> 256 -> 256 -> 256 -> 48)
+BCPlanner         : Behavior-cloning AbstractPlanner wrapper
+IDMPlanner        : Intelligent Driver Model AbstractPlanner wrapper
+DAggerPlanner     : DAgger data-collection wrapper around BCPlanner
+BEVPolicy         : CNN architecture (3×64×64 + 6) -> 48
+BEVPlanner        : BEV CNN AbstractPlanner wrapper (ego-history rasterization)
+MILEPolicy        : World model (encoder + GRU transition + policy), joint imitation+consistency loss
+MILEPlanner       : MILE AbstractPlanner wrapper (inference: state → encoder → latent → policy)
+GoalBCPolicy      : Goal-conditioned MLP (8 -> 256 -> 256 -> 256 -> 48, state + T+8 expert waypoint)
+GoalBCPlanner     : GoalBC wrapper — expert DB lookup for goal at inference (Phase 3a)
+MapBCPlanner      : GoalBC weights + road centerline goal at inference — no expert required (Phase 3b)
+RouteMapBCPlanner : GoalBC weights + pre-computed global route goal — fixes MapBC drift failure (Phase 3c)
 """
 
 import sqlite3
@@ -1018,6 +1017,315 @@ class MapBCPlanner(AbstractPlanner):
             i_goal = len(cl) - 1
 
         gx, gy  = cl[i_goal]
+        cos_neg = np.cos(-yaw)
+        sin_neg = np.sin(-yaw)
+        return (
+            float(cos_neg * (gx - x) - sin_neg * (gy - y)),
+            float(sin_neg * (gx - x) + cos_neg * (gy - y)),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3c — RouteMapBCPlanner
+# ---------------------------------------------------------------------------
+
+class RouteMapBCPlanner(AbstractPlanner):
+    """
+    RouteMapBC: GoalBC weights at inference with a globally-tracked pre-computed route.
+
+    Key difference from MapBCPlanner:
+      MapBC:      live map query at each step → fails when ego drifts off-road
+                  (get_proximal_map_objects returns 0 lanes once ego is >30m from road)
+      RouteMapBC: route pre-computed in initialize() → always valid, no live queries
+
+    WHY this fixes Phase 3b:
+      The drift-bootstrapping failure in MapBC happens because the point query
+      `get_proximal_map_objects(radius=30m)` is a LOCAL reference. Once the ego
+      compounding-drifts 2–3m off-road, the query returns zero lanes and the
+      straight-ahead fallback fires every step — worse than BC's implicit prior.
+
+      RouteMapBC mirrors how IDM works: compute a reference path AT SCENARIO START
+      and track progress along it globally. The stored route_pts array is always
+      valid regardless of how far the ego drifts — we just find the closest stored
+      point using argmin over all N stored waypoints.
+
+    Route construction (initialize()):
+      1. Get initial ego position from initialization.initial_ego_state
+      2. Query map for nearby lanes at initial position (radius=50m for robustness)
+      3. Select most forward-aligned lane (same heading-weighted scoring as MapBC v2)
+      4. Walk along centerline for 200m by chaining successor lanes
+      5. Store as self._route_pts — (N, 2) float64 array in global UTM coordinates
+
+    Goal computation (each planning step):
+      1. Find closest route point to current ego position (argmin over all route_pts)
+      2. Walk 8m forward from that point along the stored route
+      3. Transform goal to ego-frame → (dx_goal, dy_goal)
+      4. Always valid: route_pts are pre-stored, not live-queried
+
+    WHY 200m route:
+      nuPlan mini scenarios are 15–25 seconds at 5–15 m/s → 75–375m.
+      200m covers the majority of scenarios. If route runs out, fall back to last
+      waypoint direction (equivalent to "keep driving forward").
+
+    WHY reuse goal_bc.pt:
+      MapBC and GoalBC have identical training (same data, architecture, T+8 expert
+      goals). Only inference differs — the goal SOURCE changes. RouteMapBC uses the
+      same weights; the pre-computed route replaces both the expert DB and the live
+      map query. This isolates the effect of global vs. local goal reference.
+
+    REF: IDM reference-path tracking concept. Treiber et al. (2000).
+    """
+
+    def __init__(self, checkpoint_path: str, look_ahead_m: float = 8.0) -> None:
+        self._look_ahead_m = look_ahead_m
+        self._route_pts: Optional[np.ndarray] = None   # (N, 2) global UTM waypoints
+        self._map_api = None   # injected via initialize()
+
+        # WHY load weights in __init__ (same as MapBCPlanner): avoids repeated disk
+        # reads if the planner is instantiated once and reused across scenarios.
+        ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+        self._model = GoalBCPolicy().to('cpu')
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
+        self._X_mean = torch.tensor(ckpt['X_mean'], dtype=torch.float32)
+        self._X_std  = torch.tensor(ckpt['X_std'],  dtype=torch.float32)
+        self._Y_mean = ckpt['Y_mean']
+        self._Y_std  = ckpt['Y_std']
+
+    def name(self) -> str:
+        return 'RouteMapBCPlanner'
+
+    def observation_type(self):
+        from nuplan.planning.simulation.observation.observation_type import DetectionsTracks
+        return DetectionsTracks
+
+    def initialize(self, initialization) -> None:
+        """Store map_api and reset route. Route is built lazily on the first planning step.
+
+        WHY lazy construction: PlannerInitialization does not expose an initial_ego_state
+        field in this nuPlan version — only map_api, mission_goal, and route_roadblock_ids.
+        The first call to compute_planner_trajectory() receives the t=0 ego state via
+        PlannerInput, so we defer _build_route() to that point. The result is identical
+        to "compute at scenario start" because step-0 IS the scenario start.
+        """
+        self._map_api   = initialization.map_api
+        self._route_pts = None   # reset so each scenario gets a fresh route
+
+    def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
+        ego = current_input.history.current_state[0]
+        x_g = ego.rear_axle.x
+        y_g = ego.rear_axle.y
+        yaw = ego.rear_axle.heading
+        dcs = ego.dynamic_car_state
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
+
+        # WHY lazy route construction: PlannerInitialization has no initial_ego_state.
+        # We build the route once on the first planning call (which IS t=0) using the
+        # actual ego state from PlannerInput. All subsequent steps reuse self._route_pts.
+        if self._route_pts is None:
+            self._route_pts = self._build_route(ego, self._map_api)
+
+        # Goal from pre-computed route — always valid regardless of ego drift
+        dx_goal, dy_goal = self._get_route_goal(x_g, y_g, yaw)
+
+        feat = torch.tensor(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal],
+            dtype=torch.float32,
+        )
+        feat_norm = (feat - self._X_mean) / self._X_std
+
+        with torch.no_grad():
+            pred_norm = self._model(feat_norm.unsqueeze(0)).squeeze(0).numpy()
+        pred = (pred_norm * self._Y_std + self._Y_mean).reshape(FUTURE_STEPS, 3)
+
+        cos_h = np.cos(yaw)
+        sin_h = np.sin(yaw)
+        states = [ego]
+        for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
+            states.append(EgoState.build_from_rear_axle(
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
+                rear_axle_velocity_2d=StateVector2D(vx, vy),
+                rear_axle_acceleration_2d=StateVector2D(ax, ay),
+                tire_steering_angle=0.0,
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
+        return InterpolatedTrajectory(states)
+
+    def _build_route(self, initial_ego_state, map_api) -> np.ndarray:
+        """
+        Build a 200m route from the initial ego position along the road centerline.
+
+        Returns: (N, 2) float64 array of global UTM waypoints.
+
+        Algorithm:
+          1. Query lanes at initial position (radius=50m — wider than MapBC's 30m
+             for robustness on scenarios where ego starts near intersection edges)
+          2. Select most forward-aligned lane (heading-weighted score, same as MapBC v2)
+          3. Collect centerline from closest point to end of that lane
+          4. Chain successor lanes until 200m accumulated or MAX_CHAIN reached
+          5. If no lanes found, fall back to a 200m straight in current heading direction
+        """
+        from nuplan.common.maps.maps_datatypes import SemanticMapLayer
+        from nuplan.common.actor_state.state_representation import Point2D
+
+        x0  = initial_ego_state.rear_axle.x
+        y0  = initial_ego_state.rear_axle.y
+        yaw0 = initial_ego_state.rear_axle.heading
+
+        # WHY radius=50m: at scenario start the ego is always on-road so 50m is
+        # generous enough to find lanes even at wide intersections. MapBC used 30m
+        # live per step — starting at 50m once is cheap and more reliable.
+        try:
+            result = map_api.get_proximal_map_objects(
+                Point2D(x0, y0), radius=50.0, layers=[SemanticMapLayer.LANE]
+            )
+            lanes = result[SemanticMapLayer.LANE]
+        except Exception:
+            return self._straight_route(x0, y0, yaw0, length_m=200.0, step_m=2.0)
+
+        if not lanes:
+            # Some scenarios start in a parking lot or off-road. Straight is safest.
+            return self._straight_route(x0, y0, yaw0, length_m=200.0, step_m=2.0)
+
+        # Select the most forward-aligned lane using heading-weighted distance score
+        # (identical to MapBC v2 selection — ensures the best lane is picked at start)
+        ego_dir = np.array([np.cos(yaw0), np.sin(yaw0)])
+        best_lane, best_score = None, float('inf')
+        for lane in lanes:
+            try:
+                cl_pts = np.array([(s.x, s.y) for s in lane.baseline_path.discrete_path])
+                dists  = np.linalg.norm(cl_pts - np.array([x0, y0]), axis=1)
+                i0     = int(np.argmin(dists))
+                d      = float(dists[i0])
+                i_next = min(i0 + 1, len(cl_pts) - 1)
+                tangent = cl_pts[i_next] - cl_pts[i0]
+                t_norm  = np.linalg.norm(tangent)
+                cos_a   = float(np.dot(tangent / t_norm, ego_dir)) if t_norm > 1e-6 else 0.0
+                # WHY 30.0 penalty: same calibration as MapBC v2. Anti-aligned lane
+                # (cos_a = -1) gets +30m added to its apparent distance → excluded
+                # unless it is the only lane within 30m.
+                score = d + 30.0 * max(0.0, -cos_a)
+                if score < best_score:
+                    best_score, best_lane = score, lane
+            except Exception:
+                continue
+
+        if best_lane is None:
+            return self._straight_route(x0, y0, yaw0, length_m=200.0, step_m=2.0)
+
+        # Collect centerline from closest point to end of best lane
+        cl = np.array([(s.x, s.y) for s in best_lane.baseline_path.discrete_path])
+        dists = np.linalg.norm(cl - np.array([x0, y0]), axis=1)
+        i0    = int(np.argmin(dists))
+        route = cl[i0:]   # WHY start from i0: skip the behind-ego portion of the lane
+
+        # Measure how much route we already have
+        total_length = 0.0
+        if len(route) > 1:
+            total_length = float(np.sum(np.linalg.norm(np.diff(route, axis=0), axis=1)))
+
+        # Chain successor lanes until we reach 200m
+        # WHY MAX_CHAIN=8: typical nuPlan lane segments are 20–50m → 8 segments = 160–400m.
+        # Hard cap prevents infinite loop on roundabout topology (circular successors).
+        current_lane = best_lane
+        MAX_CHAIN = 8
+        for _ in range(MAX_CHAIN):
+            if total_length >= 200.0:
+                break
+            try:
+                successors = current_lane.outgoing_edges
+                if not successors:
+                    break
+                # Pick successor most aligned with current travel direction
+                last_dir = route[-1] - route[-2] if len(route) > 1 else ego_dir
+                last_dir_n = last_dir / (np.linalg.norm(last_dir) + 1e-8)
+                best_succ, best_cos = None, -1.0
+                for succ in successors:
+                    try:
+                        succ_pts = np.array(
+                            [(s.x, s.y) for s in succ.baseline_path.discrete_path]
+                        )
+                        if len(succ_pts) < 2:
+                            continue
+                        tangent = succ_pts[1] - succ_pts[0]
+                        cos_a   = float(
+                            np.dot(tangent / (np.linalg.norm(tangent) + 1e-8), last_dir_n)
+                        )
+                        if cos_a > best_cos:
+                            best_cos, best_succ = cos_a, succ
+                    except Exception:
+                        continue
+                if best_succ is None:
+                    break
+                succ_pts = np.array(
+                    [(s.x, s.y) for s in best_succ.baseline_path.discrete_path]
+                )
+                route = np.vstack([route, succ_pts])
+                total_length += float(
+                    np.sum(np.linalg.norm(np.diff(succ_pts, axis=0), axis=1))
+                )
+                current_lane = best_succ
+            except Exception:
+                break
+
+        return route.astype(np.float64)
+
+    def _straight_route(
+        self, x: float, y: float, yaw: float, length_m: float = 200.0, step_m: float = 2.0
+    ) -> np.ndarray:
+        """
+        Fallback: straight-line route in current heading direction.
+        WHY: some nuPlan scenarios start off-road or in parking areas where the map
+        returns no lanes within 50m. A straight route is neutral — same as the
+        MapBC fallback but pre-committed so it won't fire every step.
+        """
+        n   = int(length_m / step_m)
+        pts = np.array([
+            [x + step_m * i * np.cos(yaw), y + step_m * i * np.sin(yaw)]
+            for i in range(n)
+        ], dtype=np.float64)
+        return pts
+
+    def _get_route_goal(self, x: float, y: float, yaw: float) -> Tuple[float, float]:
+        """
+        Get look_ahead_m forward point along pre-computed route in ego-frame.
+
+        WHY argmin over ALL route_pts (not a sliding window):
+          The ego may drift 50+ m off road. A local window around the last-tracked
+          index could become stale and produce a goal behind the ego. Full argmin is
+          O(N) but N ≈ 100–1000 and called at 10 Hz — negligible cost.
+          This guarantees the closest valid route point is always found.
+        """
+        if self._route_pts is None or len(self._route_pts) == 0:
+            # WHY straight-ahead: no route available — same convention as MapBC FALLBACK
+            return (float(self._look_ahead_m), 0.0)
+
+        # Step 1: closest route point to current ego position
+        dists = np.linalg.norm(self._route_pts - np.array([x, y]), axis=1)
+        i0    = int(np.argmin(dists))
+
+        # Step 2: walk look_ahead_m forward from i0 along stored route
+        cum    = 0.0
+        i_goal = min(i0 + 1, len(self._route_pts) - 1)
+        for i in range(i0, len(self._route_pts) - 1):
+            cum += float(np.linalg.norm(self._route_pts[i + 1] - self._route_pts[i]))
+            if cum >= self._look_ahead_m:
+                i_goal = i + 1
+                break
+        else:
+            # WHY: route ran out. Use last stored point — keeps the goal meaningful
+            # and avoids the straight-ahead fallback (which caused MapBC to fail).
+            i_goal = len(self._route_pts) - 1
+
+        gx, gy  = self._route_pts[i_goal]
         cos_neg = np.cos(-yaw)
         sin_neg = np.sin(-yaw)
         return (

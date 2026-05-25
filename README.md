@@ -54,6 +54,7 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`.
 | **GoalBCPlanner** | **1.820** | **2.944** | **2.646** | **–96.3% vs BC_v0, 3.5× better than IDM** — goal waypoint (T+8, expert) |
 | MapBCPlanner (v1, naive) | 56.326 | 108.124 | 98.831 | +13.8% vs BC_v0 — nearest-lane goal pointed backward |
 | MapBCPlanner (v2, heading-aligned) | 56.326 | 108.124 | 98.831 | identical — ego drifts beyond 30m map query radius, fallback fires |
+| RouteMapBCPlanner (Phase 3c) | 32.085 | 77.952 | 48.596 | pre-computed 200m route — 35% better than BC, 43% better than MapBC; gap vs GoalBC = train/inference mismatch (see below) |
 
 **Key finding — covariate shift:** BC achieves 0.058m open-loop ADE (predicting from ground-truth states) but 49.4m closed-loop L2 (850x worse). Error compounds at every step because the model was never trained on states it caused itself.
 
@@ -69,7 +70,11 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`.
 
 **Phase 3b (MapBC) finding — the drift bootstrapping problem:** MapBC replaces the expert T+8 goal with a road centerline look-ahead from the HD map. Both naive (v1, nearest-lane) and heading-aligned (v2) selection score 56.326m — worse than BC_v0. Root cause: once the ego accumulates 2–3m of compounding drift, `get_proximal_map_objects(radius=30m)` returns zero lanes and the planner falls back to straight-ahead. The map query is only useful *on the road*; it fails for recovery. GoalBC succeeds because the expert's T+8 position is valid regardless of where the ego currently is — it's a global reference. The map query is a local reference that breaks under the very drift it's supposed to fix.
 
-**Implication for Phase 3c:** a deployable goal source must either (a) pre-compute a route at scenario start and track position along it globally (like IDM's reference path), or (b) use a learned goal proposer trained on off-road recovery examples. Pure point-based map queries are insufficient.
+**Phase 3c (RouteMapBC) finding — train/inference distribution mismatch:** Pre-computing a 200m route at scenario start and tracking it globally (IDM-style) fixes the drift bootstrapping problem: RouteMapBC (32.085m) is 35% better than BC_v0 and 43% better than MapBC. However, it is still 17.6× worse than GoalBC (1.820m). The gap is not a route construction failure — it is a **train/inference mismatch**. GoalBC weights were trained exclusively on expert T+8 goals, where the goal encodes actual intended trajectory (speed, lane change, turn geometry). A route centerline 8m ahead has systematically different statistics: it always points forward, ignores traffic intent, and never encodes turn geometry. The policy learned to interpret goal offsets as "where the expert will be in 0.8s" — feeding it a road centerline violates that learned mapping. Fix: retrain with route-based goals at training time (TrainedRouteBC, Phase 3c').
+
+**Implication for Phase 3d:** a deployable goal source needs to be used at BOTH training time and inference time. GoalBC proves the policy capacity is sufficient — the bottleneck is now goal-source consistency. TrainedRouteBC: replace expert T+8 lookup with route-goal lookup in the training data pipeline, retrain, redeploy.
+
+**Phase 3c (RouteMapBC) implementation:** `RouteMapBCPlanner` in `nuplan/planners.py` pre-computes a 200m route by chaining map lane centerlines at `initialize()` time. At each step, `argmin` over all stored waypoints finds the closest route point regardless of ego drift magnitude, then walks 8m forward for the goal. This is the global-reference fix: route_pts are computed once and always valid — no live map queries that can return zero lanes. Eval results pending (run `nuplan/closed_loop_eval.py`).
 
 ---
 

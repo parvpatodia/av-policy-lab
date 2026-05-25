@@ -11,8 +11,8 @@
 | NeetCode | 14–21 | 9 (Valid Sudoku + Longest Consecutive done May 24) | ⚠️ Need 5 more Mon–Wed |
 | Applications | 8 (2/day Mon-Thu) | 13 submitted (all-time) | ✅ Ahead |
 | Cold emails | 10 | 6 sent (May 20-21) | ⚠️ Need 4 more Mon/Tue |
-| Karpathy | L4 due | L3 done, L4 not done | ⚠️ Must do Monday |
-| AV-Policy-Lab | Phase 3b complete | GoalBC 1.82m, MapBC 56.3m (drift bootstrapping) | ✅ Phase 3b done |
+| Karpathy | L4 due | L3 done, L4 not done | ⚠️ Must do today (Mon) |
+| AV-Policy-Lab | Phase 3c eval | RouteMapBC 32.085m — Phase 3c COMPLETE | ✅ Phase 3c done |
 
 ## All-time Counts
 - NeetCode: 9/150
@@ -20,7 +20,7 @@
 - Cold emails sent: 6 (4 follow-ups due May 27-28)
 - Karpathy: L1 ✅ L2 ✅ L3 ✅ L4 ⬜ L5 ⬜ L6 ⬜ L7 ⬜
 
-## AV-Policy-Lab Results — Phase 3b COMPLETE
+## AV-Policy-Lab Results — Phase 3c COMPLETE
 
 ### Closed-loop L2 (all policies, nuPlan mini)
 | Policy | Avg L2 (m) | Key signal |
@@ -32,15 +32,18 @@
 | IDMPlanner | **6.285** | rule-based road following |
 | **GoalBCPlanner** | **1.820** | **expert T+8 goal — 96.3% reduction** |
 | MapBCPlanner | 56.326 | nearest-lane point query (fails off-road) |
+| **RouteMapBCPlanner** | **32.085** | **pre-computed 200m route — 35% better than BC** |
 
-**Phase 3b finding: drift bootstrapping problem.** Map point queries only work ON the road. Once ego drifts 2-3m off-road, query returns 0 lanes → fallback to straight-ahead → worse than BC. GoalBC works because expert T+8 is a GLOBAL reference. Phase 3c: pre-compute route at scenario start → route tracker = always valid.
+**Phase 3b finding: drift bootstrapping.** Map point queries fail once ego drifts off-road → query returns 0 lanes → straight-ahead fallback → worse than BC.
 
-## Next Session Priorities (Monday May 25)
-1. Valid Palindrome + 4 NeetCode to catch up (target: 14/150 by EOW)
-2. Karpathy L4: BatchNorm — non-negotiable
-3. 2 applications: Tesla Optimus + FieldAI Manipulation (fill, don't submit)
-4. 2 cold emails (need 4 more this week total)
-5. AV-Policy-Lab Phase 3c: RouteMapBCPlanner (pre-computed route, no expert needed)
+**Phase 3c finding: train/inference mismatch.** Global route fixes drift bootstrapping (32m vs 56m, +43%). But GoalBC weights were trained on expert T+8 goals — a systematically different distribution from route centerline goals. Policy learned "goal offset = where expert will be in 800ms" — route goals violate that mapping. Fix: **TrainedRouteBC** — retrain with route goals at training time.
+
+## Next Priorities (Mon May 25 afternoon — today)
+1. **NeetCode**: Valid Palindrome + 4 more (need 14/150 by EOW today)
+2. **Karpathy L4**: BatchNorm — non-negotiable, do after gym
+3. **Applications**: Tesla Optimus + FieldAI Manipulation (fill, don't submit)
+4. **Cold emails**: 2 today, 2 Tue (need 4 more this week)
+5. **AV Phase 3c'**: TrainedRouteBC notebook — retrain GoalBC with route-based goals
 
 ---
-*Last updated: 2026-05-25 (overnight)*
+*Last updated: 2026-05-25 11:25 AM (Phase 3c eval complete)*

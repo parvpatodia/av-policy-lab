@@ -55,26 +55,62 @@ learned policy needs the same: a route tracker, not a point query.
 
 ---
 
-## Phase 3c — Route-tracked MapBC (next)
+## Phase 3c — RouteMapBC (planners.py: RouteMapBCPlanner) ✅ COMPLETE
 
-**Fix for Phase 3b:** Pre-compute the reference route at scenario start (first 5 ego poses →
-project onto nearest centerline → store as ordered waypoints). At each step, find the closest
-route waypoint + walk 8m forward. This never loses the route even at 50m off-road drift.
+**Fix for Phase 3b:** Pre-compute a 200m route at `initialize()` from map centerlines chained
+via `outgoing_edges`. Lazy init (route built on first `compute_planner_trajectory` call using
+step-0 ego state, since `PlannerInitialization` doesn't expose `initial_ego_state`). At each
+step: argmin over all stored route_pts + walk 8m forward. Always valid — no live map queries.
 
-**Implementation:**
-```python
-class RouteMapBCPlanner(AbstractPlanner):
-    def initialize(self, initialization):
-        # pre-compute route from first few ego states + map
-        self._route_pts = self._extract_route(initialization)
-    
-    def compute_planner_trajectory(self, current_input):
-        # find closest route point, walk 8m forward
-        # always valid because route_pts are pre-stored, not queried live
-```
+**Implementation:** `RouteMapBCPlanner` in `nuplan/planners.py`:
+- `initialize()`: store `map_api`, reset `_route_pts = None`
+- First `compute_planner_trajectory()`: call `_build_route(ego, map_api)` → `self._route_pts`
+- `_build_route()`: query lanes at t=0 (radius=50m), select heading-aligned lane, chain successors
+- `_get_route_goal()`: argmin over all route_pts → walk 8m forward → ego-frame transform
+- `compute_planner_trajectory()`: identical to MapBC except goal source = `_get_route_goal()`
 
-**Expected:** close the gap between MapBC (56m) and GoalBC (1.82m). If route-tracked MapBC
-approaches GoalBC, the entire gain is recoverable without expert data.
+### Results
+- **Avg L2: 32.085m** (max 77.952m, p90 48.596m)
+- vs MapBC: **43% better** (56.326 → 32.085m) — global route fixes drift bootstrapping ✅
+- vs BC_v0: **35% better** (49.449 → 32.085m)
+- vs GoalBC: **17.6× worse** (1.820 → 32.085m) ← key finding (see below)
+- vs IDM:   **5.1× worse** (6.285 → 32.085m)
+
+### Finding: train/inference distribution mismatch
+The 32.085m result confirms global route construction works (gap from MapBC closed), but
+reveals a new bottleneck: **the GoalBC weights were never trained with route-based goals**.
+
+GoalBC training: `goal = expert_pos_T+8 − ego_pos` (in ego-frame) — encodes actual intended
+trajectory including speed profile, turns, lane changes.
+
+RouteMapBC inference: `goal = route_centerline_8m_ahead − ego_pos` — always forward, ignores
+traffic intent, never encodes turn geometry.
+
+The policy learned to decode "goal offset" as "where the expert intended to be in 800ms."
+Route centerline goals violate this learned mapping → policy still deviates from road.
+
+**The fix is NOT architectural — it is data:** retrain with route-based goals at training time.
+
+---
+
+## Phase 3c' — TrainedRouteBC
+
+**Hypothesis:** Route-based goals work at inference — the gap vs GoalBC is purely a training
+distribution mismatch. If we replace the expert T+8 lookup in the *training data pipeline*
+with a route-based goal (same source as inference), the policy learns to decode route goals
+correctly and should approach GoalBC performance without expert data at inference.
+
+**Changes from GoalBC training:**
+- `extract_from_db_with_goal()` → `extract_from_db_with_route_goal()`: for each training
+  window, compute route goal using pre-built per-scenario route (same `_build_route()` logic)
+  instead of expert T+8 lookup. Goal = route_centerline_8m_ahead in ego-frame.
+- Everything else identical: architecture, training loop, normalization, closed-loop harness.
+
+**Expected:** trained-route ≈ GoalBC (1.82m). This proves the gap was goal-source mismatch,
+not route quality. If TrainedRouteBC ≈ GoalBC: the full 96% gain is achievable without expert
+data at inference → deployable policy claim.
+
+**Status:** planned — Phase 3d (DiffusionPlanner) first, TrainedRouteBC after data pipeline work.
 
 ---
 
@@ -116,17 +152,23 @@ no_collision (contact with other agents). L2=1.82m is great but does GoalBC actu
 | IDM | 6.285m | rule-based road following |
 | **GoalBC** | **1.820m** | **expert T+8 goal** |
 | MapBC (point query) | 56.326m | nearest lane → fails off-road |
-| RouteMapBC | TBD | pre-computed route (Phase 3c) |
+| RouteMapBC | **32.085m** | pre-computed 200m route (Phase 3c) — 35% better than BC, but 17.6× worse than GoalBC |
+| TrainedRouteBC | pending | route goals at train + inference time — expects ≈ GoalBC (Phase 3c') |
 | DiffusionPlanner | TBD | multi-modal DDPM (Phase 3d) |
 
-## Hypothesis chain (revised)
+## Hypothesis chain (revised after Phase 3c)
 
 ```
-GoalBC (1.82m)     → a GLOBAL reference breaks the plateau completely
-MapBC  (56.3m)     → a LOCAL reference fails: map queries don't work off-road
-RouteMapBC         → tests if pre-computed global route closes the gap
-DiffusionPlanner   → tests if multi-modal prediction adds value over deterministic MLP
-PDM-Score eval     → honest quality metric beyond L2
+GoalBC (1.82m)       → a GLOBAL reference breaks the plateau completely
+MapBC  (56.3m)       → a LOCAL reference fails: map queries don't work off-road
+RouteMapBC (32.1m)   → global route fixes drift bootstrapping (43% vs MapBC)
+                        but 17.6× gap vs GoalBC reveals: weights trained on expert goals ≠ route goals
+TrainedRouteBC       → retrain with route goals → eliminates train/inference mismatch
+                        if ≈ GoalBC: deployable policy without expert data at inference
+DiffusionPlanner     → tests if multi-modal prediction adds value over deterministic MLP
+PDM-Score eval       → honest quality metric beyond L2
 ```
 
-The binding insight: the reference must be GLOBAL (valid everywhere) not LOCAL (only near the road).
+**Binding insight 1:** The reference must be GLOBAL (valid everywhere), not LOCAL (only near the road).
+**Binding insight 2:** Goal-source at training time MUST match goal-source at inference time.
+**Binding insight 3:** Architecture is not the bottleneck — goal representation is.
