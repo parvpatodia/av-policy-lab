@@ -1,0 +1,123 @@
+2026-05-24 17:04:44,816 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/worker_pool_builder.py:19}  Building WorkerPool...
+2026-05-24 17:04:44,817 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/utils/multithreading/worker_pool.py:101}  Worker: Sequential
+2026-05-24 17:04:44,817 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/utils/multithreading/worker_pool.py:102}  Number of nodes: 1
+Number of CPUs per node: 1
+Number of GPUs per node: 0
+Number of threads across all nodes: 1
+2026-05-24 17:04:44,817 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/worker_pool_builder.py:27}  Building WorkerPool...DONE!
+2026-05-24 17:04:44,817 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/folder_builder.py:32}  Building experiment folders...
+2026-05-24 17:04:44,817 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/folder_builder.py:35}  
+
+	Folder where all results are stored: /Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan/sim_results/closed_loop_BEVPlanner/eval
+
+2026-05-24 17:04:44,818 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/folder_builder.py:70}  Building experiment folders...DONE!
+2026-05-24 17:04:44,818 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_callback_builder.py:52}  Building AbstractCallback...
+2026-05-24 17:04:44,818 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_callback_builder.py:68}  Building AbstractCallback: 0...DONE!
+2026-05-24 17:04:44,818 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:47}  Building simulations...
+2026-05-24 17:04:44,818 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:53}  Extracting scenarios...
+2026-05-24 17:04:44,818 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/common/utils/distributed_scenario_filter.py:83}  Building Scenarios in mode DistributedMode.SINGLE_NODE
+2026-05-24 17:04:44,818 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_building_builder.py:18}  Building AbstractScenarioBuilder...
+2026-05-24 17:04:44,823 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_building_builder.py:21}  Building AbstractScenarioBuilder...DONE!
+2026-05-24 17:04:44,823 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_filter_builder.py:35}  Building ScenarioFilter...
+2026-05-24 17:04:44,824 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_filter_builder.py:44}  Building ScenarioFilter...DONE!
+2026-05-24 17:04:44,862 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:74}  Building metric engines...
+2026-05-24 17:04:44,864 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:76}  Building metric engines...DONE
+2026-05-24 17:04:44,864 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:80}  Building simulations from 3 scenarios...
+2026-05-24 17:04:44,868 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:133}  Building simulations...DONE!
+2026-05-24 17:04:44,868 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/run_simulation.py:78}  Running simulation...
+2026-05-24 17:04:44,868 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/utils.py:138}  Executing runners...
+2026-05-24 17:04:44,868 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/runner/executor.py:82}  Starting 3 simulations using Sequential!
+2026-05-24 17:04:50,534 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/runner/executor.py:127}  Number of successful simulations: 3
+2026-05-24 17:04:50,534 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/runner/executor.py:128}  Number of failed simulations: 0
+2026-05-24 17:04:50,534 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/utils.py:147}  Finished executing runners!
+2026-05-24 17:04:50,536 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/utils.py:74}  Saved runner reports to /Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan/sim_results/closed_loop_BEVPlanner/eval/runner_report.parquet
+2026-05-24 17:04:50,536 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/time_callback.py:27}  Simulation duration: 00:00:05 [HH:MM:SS]
+2026-05-24 17:04:50,545 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_file_callback.py:79}  Metric files integration: 00:00:00 [HH:MM:SS]
+2026-05-24 17:04:50,550 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_aggregator_callback.py:58}  Running metric aggregator: weighted_average_metric_aggregator
+2026-05-24 17:04:50,552 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_aggregator_callback.py:69}  Metric aggregator: 00:00:00 [HH:MM:SS]
+2026-05-24 17:04:50,937 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_summary_callback.py:344}  Metric summary: 00:00:00 [HH:MM:SS]
+2026-05-24 17:04:50,937 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/run_simulation.py:80}  Finished running simulation!
+2026-05-24 17:04:52,002 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/main_callback_builder.py:20}  Building MultiMainCallback...
+2026-05-24 17:04:52,008 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/main_callback_builder.py:35}  Building MultiMainCallback: 4...DONE!
+2026-05-25 02:05:13,357 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/worker_pool_builder.py:19}  Building WorkerPool...
+2026-05-25 02:05:13,359 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/utils/multithreading/worker_pool.py:101}  Worker: Sequential
+2026-05-25 02:05:13,359 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/utils/multithreading/worker_pool.py:102}  Number of nodes: 1
+Number of CPUs per node: 1
+Number of GPUs per node: 0
+Number of threads across all nodes: 1
+2026-05-25 02:05:13,359 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/worker_pool_builder.py:27}  Building WorkerPool...DONE!
+2026-05-25 02:05:13,359 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/folder_builder.py:32}  Building experiment folders...
+2026-05-25 02:05:13,359 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/folder_builder.py:35}  
+
+	Folder where all results are stored: /Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan/sim_results/closed_loop_BEVPlanner/eval
+
+2026-05-25 02:05:13,360 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/folder_builder.py:70}  Building experiment folders...DONE!
+2026-05-25 02:05:13,360 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_callback_builder.py:52}  Building AbstractCallback...
+2026-05-25 02:05:13,360 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_callback_builder.py:68}  Building AbstractCallback: 0...DONE!
+2026-05-25 02:05:13,360 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:47}  Building simulations...
+2026-05-25 02:05:13,360 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:53}  Extracting scenarios...
+2026-05-25 02:05:13,360 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/common/utils/distributed_scenario_filter.py:83}  Building Scenarios in mode DistributedMode.SINGLE_NODE
+2026-05-25 02:05:13,360 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_building_builder.py:18}  Building AbstractScenarioBuilder...
+2026-05-25 02:05:13,365 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_building_builder.py:21}  Building AbstractScenarioBuilder...DONE!
+2026-05-25 02:05:13,365 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_filter_builder.py:35}  Building ScenarioFilter...
+2026-05-25 02:05:13,365 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_filter_builder.py:44}  Building ScenarioFilter...DONE!
+2026-05-25 02:05:13,404 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:74}  Building metric engines...
+2026-05-25 02:05:13,406 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:76}  Building metric engines...DONE
+2026-05-25 02:05:13,406 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:80}  Building simulations from 3 scenarios...
+2026-05-25 02:05:13,411 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:133}  Building simulations...DONE!
+2026-05-25 02:05:13,411 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/run_simulation.py:78}  Running simulation...
+2026-05-25 02:05:13,411 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/utils.py:138}  Executing runners...
+2026-05-25 02:05:13,411 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/runner/executor.py:82}  Starting 3 simulations using Sequential!
+2026-05-25 02:05:18,682 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/runner/executor.py:127}  Number of successful simulations: 3
+2026-05-25 02:05:18,683 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/runner/executor.py:128}  Number of failed simulations: 0
+2026-05-25 02:05:18,683 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/utils.py:147}  Finished executing runners!
+2026-05-25 02:05:18,685 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/utils.py:74}  Saved runner reports to /Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan/sim_results/closed_loop_BEVPlanner/eval/runner_report.parquet
+2026-05-25 02:05:18,685 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/time_callback.py:27}  Simulation duration: 00:00:05 [HH:MM:SS]
+2026-05-25 02:05:18,694 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_file_callback.py:79}  Metric files integration: 00:00:00 [HH:MM:SS]
+2026-05-25 02:05:18,698 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_aggregator_callback.py:58}  Running metric aggregator: weighted_average_metric_aggregator
+2026-05-25 02:05:18,699 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_aggregator_callback.py:69}  Metric aggregator: 00:00:00 [HH:MM:SS]
+2026-05-25 02:05:19,159 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_summary_callback.py:344}  Metric summary: 00:00:00 [HH:MM:SS]
+2026-05-25 02:05:19,159 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/run_simulation.py:80}  Finished running simulation!
+2026-05-25 02:05:20,239 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/main_callback_builder.py:20}  Building MultiMainCallback...
+2026-05-25 02:05:20,245 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/main_callback_builder.py:35}  Building MultiMainCallback: 4...DONE!
+2026-05-25 02:07:51,981 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/worker_pool_builder.py:19}  Building WorkerPool...
+2026-05-25 02:07:51,981 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/utils/multithreading/worker_pool.py:101}  Worker: Sequential
+2026-05-25 02:07:51,981 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/utils/multithreading/worker_pool.py:102}  Number of nodes: 1
+Number of CPUs per node: 1
+Number of GPUs per node: 0
+Number of threads across all nodes: 1
+2026-05-25 02:07:51,981 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/worker_pool_builder.py:27}  Building WorkerPool...DONE!
+2026-05-25 02:07:51,981 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/folder_builder.py:32}  Building experiment folders...
+2026-05-25 02:07:51,981 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/folder_builder.py:35}  
+
+	Folder where all results are stored: /Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan/sim_results/closed_loop_BEVPlanner/eval
+
+2026-05-25 02:07:51,982 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/folder_builder.py:70}  Building experiment folders...DONE!
+2026-05-25 02:07:51,982 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_callback_builder.py:52}  Building AbstractCallback...
+2026-05-25 02:07:51,983 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_callback_builder.py:68}  Building AbstractCallback: 0...DONE!
+2026-05-25 02:07:51,983 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:47}  Building simulations...
+2026-05-25 02:07:51,983 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:53}  Extracting scenarios...
+2026-05-25 02:07:51,983 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/common/utils/distributed_scenario_filter.py:83}  Building Scenarios in mode DistributedMode.SINGLE_NODE
+2026-05-25 02:07:51,983 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_building_builder.py:18}  Building AbstractScenarioBuilder...
+2026-05-25 02:07:51,987 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_building_builder.py:21}  Building AbstractScenarioBuilder...DONE!
+2026-05-25 02:07:51,987 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_filter_builder.py:35}  Building ScenarioFilter...
+2026-05-25 02:07:51,988 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/scenario_filter_builder.py:44}  Building ScenarioFilter...DONE!
+2026-05-25 02:07:52,024 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:74}  Building metric engines...
+2026-05-25 02:07:52,027 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:76}  Building metric engines...DONE
+2026-05-25 02:07:52,027 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:80}  Building simulations from 3 scenarios...
+2026-05-25 02:07:52,031 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/simulation_builder.py:133}  Building simulations...DONE!
+2026-05-25 02:07:52,031 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/run_simulation.py:78}  Running simulation...
+2026-05-25 02:07:52,031 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/utils.py:138}  Executing runners...
+2026-05-25 02:07:52,031 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/runner/executor.py:82}  Starting 3 simulations using Sequential!
+2026-05-25 02:07:57,704 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/runner/executor.py:127}  Number of successful simulations: 3
+2026-05-25 02:07:57,705 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/runner/executor.py:128}  Number of failed simulations: 0
+2026-05-25 02:07:57,705 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/utils.py:147}  Finished executing runners!
+2026-05-25 02:07:57,707 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/utils.py:74}  Saved runner reports to /Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan/sim_results/closed_loop_BEVPlanner/eval/runner_report.parquet
+2026-05-25 02:07:57,707 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/time_callback.py:27}  Simulation duration: 00:00:05 [HH:MM:SS]
+2026-05-25 02:07:57,716 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_file_callback.py:79}  Metric files integration: 00:00:00 [HH:MM:SS]
+2026-05-25 02:07:57,720 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_aggregator_callback.py:58}  Running metric aggregator: weighted_average_metric_aggregator
+2026-05-25 02:07:57,721 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_aggregator_callback.py:69}  Metric aggregator: 00:00:00 [HH:MM:SS]
+2026-05-25 02:07:58,295 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/simulation/main_callback/metric_summary_callback.py:344}  Metric summary: 00:00:00 [HH:MM:SS]
+2026-05-25 02:07:58,295 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/run_simulation.py:80}  Finished running simulation!
+2026-05-25 02:07:59,521 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/main_callback_builder.py:20}  Building MultiMainCallback...
+2026-05-25 02:07:59,527 INFO {/Users/parvpatodia/nuplan-devkit/nuplan/planning/script/builders/main_callback_builder.py:35}  Building MultiMainCallback: 4...DONE!

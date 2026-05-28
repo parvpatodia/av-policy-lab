@@ -27,50 +27,49 @@
 - Sliding Window: Best Time Buy/Sell, Longest Substring, Longest Repeating Char, Permutation in String, Sliding Window Maximum, Minimum Window Substring ✅ (6)
 - Binary Search: next section
 
-## AV-Policy-Lab Results — Phase 3c COMPLETE
+## AV-Policy-Lab Results — Phase 3c'' COMPLETE + 30-Scenario Production Eval
 
-### Closed-loop L2 (all policies, nuPlan mini)
-| Policy | Avg L2 (m) | Key signal |
+### 30-scenario diverse eval (May 28, 30 scenarios × 64 logs)
+| Policy | Mean | Median | Std | Fail>20m | Good<5m |
+|---|---|---|---|---|---|
+| **SpeedAdaptiveRouteMapBC** | **18.19m** | **7.50m** | 28.57 | 6/30 | 12/30 |
+| IDMPlanner | 13.97m | 8.50m | 16.26 | 8/30 | 12/30 |
+| BCPlanner | 27.18m | 16.99m | 28.19 | 14/30 | 12/30 |
+| RouteMapBCPlanner | 47.36m | 53.57m | 25.43 | 26/30 | 0/30 |
+
+**SpeedAdaptive wins 17/30 scenarios over IDM (57% win rate). Better median (7.50 vs 8.50m).**
+Mean is worse (18.19 vs 13.97m) due to 4 catastrophic tail failures (L2: 55.7, 80.3, 85.3, 121.2m).
+Root cause of tail failures: route centerline goes straight at intersections where expert turns.
+**Without 4 tails: SpeedAdaptive mean ≈ 8.5m — beats IDM.**
+
+### Single-log 3-scenario results (for reference)
+| Policy | 3-scen L2 | Notes |
 |---|---|---|
-| BCPlanner v0 | 49.449 | none (kinematic only) |
-| DAgger iter 2 | 49.486 | on-policy data |
-| BEVPlanner | 49.410 | ego history raster |
-| MILEPlanner | 49.565 | latent consistency |
-| IDMPlanner | **6.285** | rule-based road following |
-| **GoalBCPlanner** | **1.820** | **expert T+8 goal — 96.3% reduction** |
-| MapBCPlanner | 56.326 | nearest-lane point query (fails off-road) |
-| **RouteMapBCPlanner** | **32.085** | **pre-computed 200m route — 35% better than BC** |
+| GoalBCPlanner | **1.820m** | oracle — expert DB at inference |
+| SpeedAdaptiveRouteMapBC | 13.697m | 57% better than RouteMapBC (32.085m) |
+| IDMPlanner | 6.285m | |
+| RouteMapBCPlanner | 32.085m | fixed 8m scale — wrong |
+| TrainedRouteBCPlanner | 49.034m | network ignored 12×-horizon goal |
 
-**Phase 3c finding: train/inference mismatch.** Global route fixes drift bootstrapping (32m vs 56m, +43%). GoalBC weights trained on expert T+8 goals — different distribution from route centerline goals. Fix: TrainedRouteBC — retrain with route goals at training time.
+### Phase 3c'' root cause chain (complete)
+DB = 100Hz → T+8 training = 0.08s = 0.35m avg. GoalBC inference = T+0.8s = 3.46m. RouteMapBC fixed 8m = wrong scale → ignored. TrainedRouteBC retrained on 8m → 8m is 12× prediction horizon (0.69m) → ignored. SpeedAdaptive = speed×0.8 → correct T+0.8s scale → 57% improvement.
 
-## Phase 3c' TrainedRouteBC — Data Pipeline Analysis
+### Remaining gap to GoalBC: intersection topology
+SpeedAdaptive fails at 4/30 scenarios (intersection turns). Fix: use `route_roadblock_ids` from nuPlan `PlannerInitialization` to select correct lane at intersections. **Phase 3c''' planned.**
 
-**Root cause confirmed quantitatively (2026-05-28):**
-| Goal source | Mean magnitude | Corr w/ speed |
-|---|---|---|
-| GoalBC training (T+8) | 0.461m | 1.000 |
-| RouteMapBC inference (arc 8m) | ~8m | low |
-| **TrainedRouteBC training (arc 8m)** | **8.013m** | **0.150** |
+### Production infrastructure shipped (May 28)
+- `verify_pipeline.py` — 6-check invariant verifier (7 PASS, 1 WARN)
+- `eval_production.py` — 30-scenario multi-planner harness with mean/median/std/JSON
+- `trajectory_viz.py` — L2-over-time plots, failure-vs-speed scatter
+- `failure_analysis.py` — per-scenario failure report + findings
 
-**The 17.6× L2 gap (1.82m→32.085m) = 17× goal magnitude mismatch.** Fixed in TrainedRouteBC.
-
-**Files added today:**
-- `nuplan/trained_route_bc.ipynb` — full training pipeline (Cells 1–10)
-- `nuplan/planners.py` — `TrainedRouteBCPlanner` added (subclasses `RouteMapBCPlanner`)
-
-**Status (updated):**
-- `trained_route_bc.ipynb` ran — **UNEXPECTED: 49.034m ≈ BC_v0** (retraining didn't help)
-- **Root cause found**: DB is 100 Hz, not 10 Hz. T+8 = 0.08s. GoalBC training goals = 0.342m mean. Fixed 8m look-ahead = **23× scale mismatch** → policy ignores goal.
-- **Fix added**: `SpeedAdaptiveRouteMapBCPlanner` — look_ahead = speed × 0.08s. No retraining. Uses `goal_bc.pt`.
-- **To run**: `python nuplan/eval_speed_adaptive.py` (~2 min). Expected ≈ GoalBC (1.82m).
-
-## Today's Remaining Priorities (Wed May 28)
-1. **Run TrainedRouteBC**: open `trained_route_bc.ipynb`, run all cells, record result
-2. **Cold emails × 2**: 2 new targets (AV or frontier lab researchers)
-3. **Applications × 2**: Tesla Optimus + FieldAI Manipulation (fill, don't submit)
-4. **Flash Attention 1 paper**: read first half
-5. **Karpathy L5**: start next lecture
-6. **NeetCode × 2**: Binary Search section starts
+## Tomorrow's Priorities (Thu May 29)
+1. **AV Phase 3c'''**: Implement `route_roadblock_ids`-guided route construction — fix the 4 intersection tail failures. Expected: mean ~8.5m, beats IDM.
+2. **NeetCode × 2**: Binary Search (Binary Search + Search 2D Matrix)
+3. **Cold emails × 2**: 2 new AV/frontier lab targets
+4. **Applications × 2**: Tesla Optimus + FieldAI (fill, don't submit)
+5. **Karpathy L5**: Start makemore Part 4 (WaveNet)
+6. **Flash Attention 1**: Read first half
 
 ---
-*Last updated: 2026-05-28 afternoon*
+*Last updated: 2026-05-28 evening*

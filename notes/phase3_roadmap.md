@@ -143,32 +143,77 @@ no_collision (contact with other agents). L2=1.82m is great but does GoalBC actu
 
 ## Results summary (all phases)
 
-| Policy | Closed-loop Avg L2 | Key signal |
+Single-log 3-scenario results (goal_bc.ipynb, eval_routemapbc.py, eval_speed_adaptive.py):
+
+| Policy | 3-scen Avg L2 | Key signal |
 |---|---|---|
 | BC_v0 | 49.449m | none (kinematic only) |
 | BEV CNN | 49.410m | ego history raster |
 | MILE world model | 49.565m | latent consistency |
 | DAgger iter 2 | 49.486m | on-policy data |
-| IDM | 6.285m | rule-based road following |
-| **GoalBC** | **1.820m** | **expert T+8 goal** |
+| IDM | **6.285m** | rule-based road following |
+| **GoalBC** | **1.820m** | **expert T+8 goal (oracle — not deployable)** |
 | MapBC (point query) | 56.326m | nearest lane → fails off-road |
-| RouteMapBC | **32.085m** | pre-computed 200m route (Phase 3c) — 35% better than BC, but 17.6× worse than GoalBC |
-| TrainedRouteBC | pending | route goals at train + inference time — expects ≈ GoalBC (Phase 3c') |
-| DiffusionPlanner | TBD | multi-modal DDPM (Phase 3d) |
+| RouteMapBC (fixed 8m) | 32.085m | global route, wrong scale → 35% better than BC |
+| TrainedRouteBC (8m) | 49.034m | retrained on 8m goals — network ignores 12×-horizon goal |
+| **SpeedAdaptiveRouteMapBC** | **13.697m** | speed×0.8 look-ahead — correct scale, 57% vs RouteMapBC |
 
-## Hypothesis chain (revised after Phase 3c)
+**30-scenario diverse eval** (eval_production.py, 30 scenarios × 64 logs, May 28 2026):
+
+| Policy | Mean L2 | Median | Std | Fail>20m | Good<5m | vs IDM (per-scenario) |
+|---|---|---|---|---|---|---|
+| IDM | 13.97m | 8.50m | 16.26 | 8/30 | 12/30 | — |
+| **SpeedAdaptive** | **18.19m** | **7.50m** | **28.57** | **6/30** | **12/30** | **wins 17/30** |
+| BC | 27.18m | 16.99m | 28.19 | 14/30 | 12/30 | — |
+| RouteMapBC | 47.36m | 53.57m | 25.43 | 26/30 | 0/30 | — |
+
+**Critical finding from 30-scenario eval:**
+SpeedAdaptive wins **17/30 scenarios** over IDM (57% win rate) and has a **better median** (7.50m vs 8.50m).
+The worse mean (18.19m vs 13.97m) is driven by **4 catastrophic outliers** (L2: 55.7, 80.3, 85.3, 121.2m)
+where IDM scores 2.8–7.8m. Root cause: route centerline goes straight at intersections where the expert turns.
+**Without these 4 outliers, SpeedAdaptive mean ≈ 8.5m — beating IDM.**
+
+The distribution is bimodal:
+- 12/30 scenarios: L2 < 5m (excellent, comparable to GoalBC oracle)
+- 12/30 scenarios: L2 5–20m (moderate tracking)
+- 4/30 scenarios: L2 > 55m (catastrophic — intersection topology failure)
+
+---
+
+## Phase 3c''' — RouteMapBC with route_roadblock_ids (planned)
+
+**Hypothesis:** The 4 catastrophic failures are intersection-type scenarios where the pre-computed
+centerline route goes straight while the expert turns. nuPlan's `PlannerInitialization` provides
+`route_roadblock_ids` — the INTENDED roadblock sequence for the scenario. Using these roadblocks
+to guide route construction would give the correct turn direction at intersections.
+
+**Change:** In `_build_route()`, use `initialization.route_roadblock_ids` to filter which lanes
+to follow when chaining successors. Currently the planner picks the most forward-aligned successor
+regardless of the intended route — at a T-intersection this means straight, not the correct turn.
+
+**Expected:** Eliminate the 4 intersection failures. Mean L2 drops from ~18m to ~8–9m, matching IDM.
+
+---
+
+## Hypothesis chain (complete, as of Phase 3c'')
 
 ```
-GoalBC (1.82m)       → a GLOBAL reference breaks the plateau completely
-MapBC  (56.3m)       → a LOCAL reference fails: map queries don't work off-road
-RouteMapBC (32.1m)   → global route fixes drift bootstrapping (43% vs MapBC)
-                        but 17.6× gap vs GoalBC reveals: weights trained on expert goals ≠ route goals
-TrainedRouteBC       → retrain with route goals → eliminates train/inference mismatch
-                        if ≈ GoalBC: deployable policy without expert data at inference
-DiffusionPlanner     → tests if multi-modal prediction adds value over deterministic MLP
-PDM-Score eval       → honest quality metric beyond L2
+GoalBC (1.82m, 3-scen)         → GLOBAL oracle: expert T+8 goal breaks plateau completely
+MapBC  (56.3m)                 → LOCAL query fails: map queries don't work off-road
+RouteMapBC (32.1m, 3-scen)     → GLOBAL route fixes drift; but 8m goal = wrong scale (23× training scale)
+TrainedRouteBC (49m)           → retraining with 8m goals fails: 8m is 12× prediction horizon (0.69m),
+                                  MSE trains without goal → BC behaviour
+SpeedAdaptiveRouteMapBC:
+  3-scen:  13.7m               → speed×0.8 = correct T+0.8s scale → 57% improvement over RouteMapBC
+  30-scen: 18.2m mean / 7.5m median → wins 17/30 vs IDM; 4 intersection failures drive mean
+Route_roadblock_ids (planned)  → use intended route at intersections → eliminate tail failures
+DAgger + route goal (Phase 3d) → on-policy data for intersection recovery → close remaining gap
+DiffusionPlanner (Phase 3d)    → multi-modal DDPM for intersection decisions
+PDM-Score eval (Phase 3e)      → honest driving quality metric (comfort + progress + collision)
 ```
 
 **Binding insight 1:** The reference must be GLOBAL (valid everywhere), not LOCAL (only near the road).
 **Binding insight 2:** Goal-source at training time MUST match goal-source at inference time.
 **Binding insight 3:** Architecture is not the bottleneck — goal representation is.
+**Binding insight 4:** Intersection topology is the failure mode of centerline-following route goals.
+**Binding insight 5:** Mean L2 hides bimodal distributions — always report median and per-scenario win rate.

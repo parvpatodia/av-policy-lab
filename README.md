@@ -39,22 +39,37 @@ Evaluated on 2,000 randomly sampled windows from the held-out val split (80/10/1
 | BEV CNN | 0.051 | 0.059 | 3×64×64 ego-history + 6-dim state, ~370K params; LR decayed 1e-3→2.5e-4 |
 | MILE world model | 0.060 | 0.068 | encoder+GRU+policy, ~73K params; L_cons=0.006 (converged) |
 
-### Closed-loop (nuPlan L2 error, ego-vs-expert, 3 scenarios)
+### Closed-loop — single-log 3-scenario eval (Phase 1–3c)
 
-Controller: `perfect_tracking_controller`. Observation: `box_observation`.
+Controller: `perfect_tracking_controller`. Observation: `box_observation`. Same 3 scenarios, 1 log.
 
 | Policy | Avg L2 (m) | Max L2 (m) | p90 L2 (m) | Notes |
 |---|---|---|---|---|
 | BCPlanner (v0) | 49.449 | 104.614 | 91.526 | pure imitation |
-| BCPlanner (v1, DAgger iter 1) | 49.470 | 104.656 | 91.564 | 745 samples (0.3%) — no improvement |
-| BCPlanner (v2, DAgger iter 2) | 49.486 | 104.689 | 91.593 | 12,678 samples (4.6%) — **no improvement** |
+| BCPlanner (v2, DAgger iter 2) | 49.486 | 104.689 | 91.593 | 12,678 samples — **no improvement** |
+| BEVPlanner | 49.410 | 104.543 | 91.416 | –0.08% vs BC_v0 — spatial history irrelevant at drift scale |
+| MILEPlanner | 49.565 | 104.834 | 91.723 | world model adds no recovery |
 | IDMPlanner | **6.285** | **24.308** | **15.733** | reactive, no learning |
-| BEVPlanner | 49.410 | 104.543 | 91.416 | **–0.08% vs BC_v0** — spatial history negligible at this drift scale |
-| MILEPlanner | 49.565 | 104.834 | 91.723 | +0.2% vs BC_v0 — world model adds no recovery |
-| **GoalBCPlanner** | **1.820** | **2.944** | **2.646** | **–96.3% vs BC_v0, 3.5× better than IDM** — goal waypoint (T+8, expert) |
-| MapBCPlanner (v1, naive) | 56.326 | 108.124 | 98.831 | +13.8% vs BC_v0 — nearest-lane goal pointed backward |
-| MapBCPlanner (v2, heading-aligned) | 56.326 | 108.124 | 98.831 | identical — ego drifts beyond 30m map query radius, fallback fires |
-| RouteMapBCPlanner (Phase 3c) | 32.085 | 77.952 | 48.596 | pre-computed 200m route — 35% better than BC, 43% better than MapBC; gap vs GoalBC = train/inference mismatch (see below) |
+| **GoalBCPlanner** | **1.820** | **2.944** | **2.646** | **–96.3% vs BC_v0** — oracle (requires expert DB at inference) |
+| MapBCPlanner | 56.326 | 108.124 | 98.831 | local map query fails off-road |
+| RouteMapBCPlanner (8m fixed) | 32.085 | 77.952 | 48.596 | global route — 35% better than BC; wrong goal scale |
+| TrainedRouteBCPlanner | 49.034 | 101.902 | 89.021 | retrained on 8m goals — goal ignored (12× horizon) |
+| **SpeedAdaptiveRouteMapBC** | **13.697** | **23.725** | **19.842** | **speed×0.8 look-ahead — 57% better than RouteMapBC** |
+
+### Closed-loop — 30-scenario diverse eval (Phase 3c'', `eval_production.py`)
+
+30 scenarios sampled from all 64 nuPlan mini logs. `eval_production.py`. Run: May 28 2026.
+
+| Policy | Mean | Median | Std | Fail >20m | Good <5m | vs IDM (per-scen) |
+|---|---|---|---|---|---|---|
+| **SpeedAdaptiveRouteMapBC** | **18.19m** | **7.50m** | 28.57 | 6/30 | 12/30 | **wins 17/30** |
+| IDMPlanner | 13.97m | 8.50m | 16.26 | 8/30 | 12/30 | — |
+| BCPlanner | 27.18m | 16.99m | 28.19 | 14/30 | 12/30 | — |
+| RouteMapBCPlanner | 47.36m | 53.57m | 25.43 | 26/30 | 0/30 | — |
+
+**GoalBC oracle: 1.820m** (3-scenario single-log — not re-run in production eval to avoid per-scenario DB mismatch).
+
+**Key insight from 30-scenario distribution:** SpeedAdaptive wins 17/30 scenarios over IDM and has a better median (7.50m vs 8.50m). The worse mean (18.19 vs 13.97m) is caused by **4 catastrophic outliers** (L2: 55.7, 80.3, 85.3, 121.2m) where IDM scores 2.8–7.8m. Root cause: route centerline follows straight at intersections where the expert turns. Without these 4 tail failures, SpeedAdaptive mean ≈ **8.5m — beating IDM**. The policy is bimodal: excellent on straight-road scenarios, catastrophic at intersection topology.
 
 **Key finding — covariate shift:** BC achieves 0.058m open-loop ADE (predicting from ground-truth states) but 49.4m closed-loop L2 (850x worse). Error compounds at every step because the model was never trained on states it caused itself.
 
@@ -74,7 +89,7 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`.
 
 **Implication for Phase 3d:** a deployable goal source needs to be used at BOTH training time and inference time. GoalBC proves the policy capacity is sufficient — the bottleneck is now goal-source consistency. TrainedRouteBC: replace expert T+8 lookup with route-goal lookup in the training data pipeline, retrain, redeploy.
 
-**Phase 3c (RouteMapBC) implementation:** `RouteMapBCPlanner` in `nuplan/planners.py` pre-computes a 200m route by chaining map lane centerlines at `initialize()` time. At each step, `argmin` over all stored waypoints finds the closest route point regardless of ego drift magnitude, then walks 8m forward for the goal. This is the global-reference fix: route_pts are computed once and always valid — no live map queries that can return zero lanes. Eval results pending (run `nuplan/closed_loop_eval.py`).
+**Phase 3c'' (SpeedAdaptiveRouteMapBC) — scale fix confirmed:** `GoalBCPlanner._get_expert_at_offset` uses `offset_steps × 100ms = T+0.8s`. The nuPlan mini DB is at 100Hz (10ms/row), so training T+8 goals ≈ 0.35m average. RouteMapBC's fixed 8m look-ahead was 23× the training scale. `SpeedAdaptiveRouteMapBCPlanner` sets `look_ahead = max(0.05, speed × 0.8)`, matching the GoalBC inference temporal horizon at every speed. 3-scenario result: 32.085m → 13.697m (57% reduction). 30-scenario median: 7.50m (beats IDM 8.50m). **Tail failures** (4/30 scenarios, L2 > 55m) reveal the intersection topology problem: route centerline follows straight while expert turns. Fix: use `route_roadblock_ids` from `PlannerInitialization` to guide lane selection at intersections.
 
 ---
 
