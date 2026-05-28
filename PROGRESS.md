@@ -4,21 +4,28 @@
 
 ---
 
-## Week of May 19–25
+## Week of May 26–Jun 1
 
 | Track | Target/week | Actual | Status |
 |---|---|---|---|
-| NeetCode | 14–21 | 9 (Valid Sudoku + Longest Consecutive done May 24) | ⚠️ Need 5 more Mon–Wed |
-| Applications | 8 (2/day Mon-Thu) | 13 submitted (all-time) | ✅ Ahead |
-| Cold emails | 10 | 6 sent (May 20-21) | ⚠️ Need 4 more Mon/Tue |
-| Karpathy | L4 due | L3 done, L4 not done | ⚠️ Must do today (Mon) |
-| AV-Policy-Lab | Phase 3c eval | RouteMapBC 32.085m — Phase 3c COMPLETE | ✅ Phase 3c done |
+| NeetCode | 14 | 10 done this week (19 total) | ✅ On track |
+| Applications | 5–8 | 0 this week | ⚠️ Do tomorrow |
+| Cold emails | 5 | 0 this week | ⚠️ Do tomorrow |
+| Karpathy | L4 | L4 ✅ DONE (dev loss 2.1) | ✅ Done |
+| AV-Policy-Lab | Phase 3c' start | Not started | ⚠️ Tomorrow |
+| Physical book | Get + start | Got "The Alignment Problem" | ✅ Done |
 
 ## All-time Counts
-- NeetCode: 9/150
+- NeetCode: 19/150
 - Applications submitted: 13
-- Cold emails sent: 6 (4 follow-ups due May 27-28)
-- Karpathy: L1 ✅ L2 ✅ L3 ✅ L4 ⬜ L5 ⬜ L6 ⬜ L7 ⬜
+- Cold emails sent: 6 (follow-ups due May 27-28)
+- Karpathy: L1 ✅ L2 ✅ L3 ✅ L4 ✅ L5 ⬜ L6 ⬜ L7 ⬜
+
+## NeetCode Log
+- Arrays & Hashing: Contains Duplicate, Valid Anagram, Two Sum, Group Anagrams, Top K Frequent, Encode & Decode, Product Except Self ✅ (7)
+- Two Pointers: Valid Palindrome, Two Sum II, 3Sum, Container With Most Water ✅ (4)
+- Sliding Window: Best Time Buy/Sell, Longest Substring, Longest Repeating Char, Permutation in String, Sliding Window Maximum, Minimum Window Substring ✅ (6)
+- Binary Search: next section
 
 ## AV-Policy-Lab Results — Phase 3c COMPLETE
 
@@ -34,16 +41,32 @@
 | MapBCPlanner | 56.326 | nearest-lane point query (fails off-road) |
 | **RouteMapBCPlanner** | **32.085** | **pre-computed 200m route — 35% better than BC** |
 
-**Phase 3b finding: drift bootstrapping.** Map point queries fail once ego drifts off-road → query returns 0 lanes → straight-ahead fallback → worse than BC.
+**Phase 3c finding: train/inference mismatch.** Global route fixes drift bootstrapping (32m vs 56m, +43%). GoalBC weights trained on expert T+8 goals — different distribution from route centerline goals. Fix: TrainedRouteBC — retrain with route goals at training time.
 
-**Phase 3c finding: train/inference mismatch.** Global route fixes drift bootstrapping (32m vs 56m, +43%). But GoalBC weights were trained on expert T+8 goals — a systematically different distribution from route centerline goals. Policy learned "goal offset = where expert will be in 800ms" — route goals violate that mapping. Fix: **TrainedRouteBC** — retrain with route goals at training time.
+## Phase 3c' TrainedRouteBC — Data Pipeline Analysis
 
-## Next Priorities (Mon May 25 afternoon — today)
-1. **NeetCode**: Valid Palindrome + 4 more (need 14/150 by EOW today)
-2. **Karpathy L4**: BatchNorm — non-negotiable, do after gym
-3. **Applications**: Tesla Optimus + FieldAI Manipulation (fill, don't submit)
-4. **Cold emails**: 2 today, 2 Tue (need 4 more this week)
-5. **AV Phase 3c'**: TrainedRouteBC notebook — retrain GoalBC with route-based goals
+**Root cause confirmed quantitatively (2026-05-28):**
+| Goal source | Mean magnitude | Corr w/ speed |
+|---|---|---|
+| GoalBC training (T+8) | 0.461m | 1.000 |
+| RouteMapBC inference (arc 8m) | ~8m | low |
+| **TrainedRouteBC training (arc 8m)** | **8.013m** | **0.150** |
+
+**The 17.6× L2 gap (1.82m→32.085m) = 17× goal magnitude mismatch.** Fixed in TrainedRouteBC.
+
+**Files added today:**
+- `nuplan/trained_route_bc.ipynb` — full training pipeline (Cells 1–10)
+- `nuplan/planners.py` — `TrainedRouteBCPlanner` added (subclasses `RouteMapBCPlanner`)
+
+**Status:** Pipeline + planner complete. Run `trained_route_bc.ipynb` Cells 1-8 to train + eval. ~20 min on M5 Pro.
+
+## Today's Remaining Priorities (Wed May 28)
+1. **Run TrainedRouteBC**: open `trained_route_bc.ipynb`, run all cells, record result
+2. **Cold emails × 2**: 2 new targets (AV or frontier lab researchers)
+3. **Applications × 2**: Tesla Optimus + FieldAI Manipulation (fill, don't submit)
+4. **Flash Attention 1 paper**: read first half
+5. **Karpathy L5**: start next lecture
+6. **NeetCode × 2**: Binary Search section starts
 
 ---
-*Last updated: 2026-05-25 11:25 AM (Phase 3c eval complete)*
+*Last updated: 2026-05-28 afternoon*

@@ -1332,3 +1332,29 @@ class RouteMapBCPlanner(AbstractPlanner):
             float(cos_neg * (gx - x) - sin_neg * (gy - y)),
             float(sin_neg * (gx - x) + cos_neg * (gy - y)),
         )
+
+
+class TrainedRouteBCPlanner(RouteMapBCPlanner):
+    """
+    Phase 3c' — TrainedRouteBC: retrained version of RouteMapBC.
+
+    The ONLY difference from RouteMapBCPlanner is the checkpoint it loads:
+      RouteMapBCPlanner     → goal_bc.pt           (trained on expert T+8 goals)
+      TrainedRouteBCPlanner → trained_route_bc.pt  (trained on arc-length-8m route goals)
+
+    WHY this matters (train/inference mismatch from Phase 3c):
+      RouteMapBC achieved 32.085m vs GoalBC 1.820m (17.6× gap).
+      goal_bc.pt learned: "goal offset = where expert will be in 0.8s."
+      At inference, RouteMapBC feeds: "goal = road centerline 8m ahead."
+      These have systematically different statistics — the policy decodes them incorrectly.
+
+      Fix: retrain with arc-length-8m route goals at BOTH training and inference time.
+      The training distribution NOW matches inference. Expected result: ≈ GoalBC (1.820m)
+      without requiring expert data at inference → deployable policy claim.
+
+    Inference code: 100% identical to RouteMapBCPlanner. Only checkpoint differs.
+    REF: Phase 3c finding, binding insight 2, phase3_roadmap.md.
+    """
+
+    def name(self) -> str:
+        return 'TrainedRouteBCPlanner'
