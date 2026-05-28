@@ -265,3 +265,111 @@ def test_constants(planners_mod):
     """FUTURE_STEPS == 16 and DT == 0.1 (planner horizon and waypoint spacing)."""
     assert planners_mod.FUTURE_STEPS == 16
     assert planners_mod.DT == pytest.approx(0.1, abs=1e-12)
+
+
+# ===========================================================================
+# Group 7: RoadblockRouteMapBCPlanner (Phase 3c''' — route_roadblock_ids)
+# ===========================================================================
+
+class _FakePt:
+    """A baseline-path point exposing .x/.y (matches lane.baseline_path.discrete_path)."""
+    def __init__(self, x, y):
+        self.x = float(x)
+        self.y = float(y)
+
+
+class _FakeLane:
+    """Minimal successor lane: tangent from its first two points, plus id/roadblock id.
+
+    `direction` is the (dx, dy) of the lane's entry tangent — used by
+    _select_successor's heading-alignment scoring. `roadblock_id`/`lane_id` feed
+    _on_route. Set `raise_rb=True` to simulate a map where get_roadblock_id() throws,
+    exercising the lane-id fallback path.
+    """
+    def __init__(self, direction, roadblock_id="rb", lane_id="ln", raise_rb=False):
+        dx, dy = direction
+        self.baseline_path = type(
+            "BP", (), {"discrete_path": [_FakePt(0.0, 0.0), _FakePt(dx, dy)]}
+        )()
+        self.id = lane_id
+        self._rb = roadblock_id
+        self._raise_rb = raise_rb
+
+    def get_roadblock_id(self):
+        if self._raise_rb:
+            raise RuntimeError("no roadblock id on this map version")
+        return self._rb
+
+
+@pytest.fixture
+def roadblock_planner(planners_mod, fake_ckpt):
+    """A RoadblockRouteMapBCPlanner built from the fake checkpoint (real __init__ runs)."""
+    return planners_mod.RoadblockRouteMapBCPlanner(fake_ckpt)
+
+
+def test_roadblock_subclass_sets_flag(roadblock_planner):
+    """Inherits speed_adaptive=True from SpeedAdaptiveRouteMapBCPlanner."""
+    assert roadblock_planner._speed_adaptive is True
+    assert roadblock_planner.name() == "RoadblockRouteMapBCPlanner"
+
+
+def test_roadblock_initialize_normalizes_ids(roadblock_planner):
+    """initialize() stores route_roadblock_ids as a frozenset of strings (ints coerced)."""
+    init = type("Init", (), {"map_api": object(), "route_roadblock_ids": [10, "20", 30]})()
+    roadblock_planner.initialize(init)
+    assert roadblock_planner._route_roadblock_ids == frozenset({"10", "20", "30"})
+    # Parent contract still holds: map_api stored, route reset.
+    assert roadblock_planner._map_api is init.map_api
+    assert roadblock_planner._route_pts is None
+
+
+def test_roadblock_initialize_missing_ids(roadblock_planner):
+    """A None/absent route_roadblock_ids yields an empty set (Liskov-safe default)."""
+    init = type("Init", (), {"map_api": object(), "route_roadblock_ids": None})()
+    roadblock_planner.initialize(init)
+    assert roadblock_planner._route_roadblock_ids == frozenset()
+
+
+def test_on_route_matches_roadblock_id(roadblock_planner):
+    """_on_route is True when the lane's roadblock id is in the route set."""
+    roadblock_planner._route_roadblock_ids = frozenset({"rb-A"})
+    assert roadblock_planner._on_route(_FakeLane((1, 0), roadblock_id="rb-A")) is True
+    assert roadblock_planner._on_route(_FakeLane((1, 0), roadblock_id="rb-B")) is False
+
+
+def test_on_route_lane_id_fallback(roadblock_planner):
+    """When get_roadblock_id() raises, _on_route falls back to the lane's own id."""
+    roadblock_planner._route_roadblock_ids = frozenset({"ln-7"})
+    lane = _FakeLane((1, 0), lane_id="ln-7", raise_rb=True)
+    assert roadblock_planner._on_route(lane) is True
+
+
+def test_select_successor_prefers_on_route(roadblock_planner):
+    """At a junction, the on-route successor is chosen even if worse-aligned.
+
+    The straight-ahead lane (better aligned with +x) is OFF route; the turning lane
+    (on route) must win — this is the exact fix for the straight-through failures.
+    """
+    roadblock_planner._route_roadblock_ids = frozenset({"turn-rb"})
+    straight = _FakeLane((1.0, 0.0), roadblock_id="straight-rb")   # best heading match
+    turn     = _FakeLane((0.3, 1.0), roadblock_id="turn-rb")       # on route
+    chosen = roadblock_planner._select_successor([straight, turn], np.array([1.0, 0.0]))
+    assert chosen is turn
+
+
+def test_select_successor_falls_back_to_heading(roadblock_planner):
+    """With no successor on route, defer to parent heading alignment (straightest wins)."""
+    roadblock_planner._route_roadblock_ids = frozenset({"absent-rb"})
+    straight = _FakeLane((1.0, 0.0), roadblock_id="x")
+    turn     = _FakeLane((0.3, 1.0), roadblock_id="y")
+    chosen = roadblock_planner._select_successor([straight, turn], np.array([1.0, 0.0]))
+    assert chosen is straight
+
+
+def test_select_successor_empty_ids_matches_parent(roadblock_planner):
+    """Empty route_roadblock_ids → behaviour identical to the heading-only parent."""
+    roadblock_planner._route_roadblock_ids = frozenset()
+    straight = _FakeLane((1.0, 0.0), roadblock_id="x")
+    turn     = _FakeLane((0.3, 1.0), roadblock_id="y")
+    chosen = roadblock_planner._select_successor([straight, turn], np.array([1.0, 0.0]))
+    assert chosen is straight
