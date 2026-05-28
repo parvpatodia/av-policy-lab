@@ -1,0 +1,46 @@
+# Project-local composed metric set for eval_production.py.
+#
+# WHY this file exists:
+# nuPlan's `simulation_metric` config group is a defaults LIST. Selecting
+# `simulation_metric=simulation_closed_loop_nonreactive_agents` REPLACES the
+# whole list, dropping the default `common_metrics` set — so freshly-run
+# planners get the 7 PDM components but NO ego_expert_L2_error parquet, and
+# parse_results() then fails for them.
+#
+# Naively composing both (simulation_metric=[common_metrics,
+# simulation_closed_loop_nonreactive_agents]) does NOT work: both upstream
+# configs define a `low_level:` key inside the `simulation_metric` group, and
+# Hydra's defaults-list merge makes the second `low_level:` OVERRIDE the first
+# rather than concatenate. That is exactly why the devkit's nonreactive config
+# keeps `# - common_metrics` commented out.
+#
+# FIX: a single config that lists every low_level + high_level statistic from
+# BOTH groups under one `low_level:` / one `high_level:` block, so a single
+# eval run emits the L2 metrics AND all PDM components together.
+#
+# Selected from eval_production.py via:
+#     simulation_metric=prod_eval_metrics
+# (the repo config dir is added to hydra.searchpath in build_cfg()).
+defaults:
+  - low_level:
+      # ── from common_metrics (the project's primary L2 metric) ──
+      - ego_mean_speed_statistics
+      - ego_expert_l2_error_statistics
+      - ego_expert_l2_error_with_yaw_statistics
+      # ── from simulation_closed_loop_nonreactive_agents (PDM low-level deps) ──
+      - ego_lane_change_statistics
+      - ego_jerk_statistics
+      - ego_lat_acceleration_statistics
+      - ego_lon_acceleration_statistics
+      - ego_lon_jerk_statistics
+      - ego_yaw_acceleration_statistics
+      - ego_yaw_rate_statistics
+      - ego_progress_along_expert_route_statistics
+  - high_level:  # PDM high-level components (depend on the low-level metrics above)
+      - drivable_area_compliance_statistics
+      - no_ego_at_fault_collisions_statistics
+      - time_to_collision_within_bound_statistics
+      - speed_limit_compliance_statistics
+      - ego_is_comfortable_statistics
+      - ego_is_making_progress_statistics
+      - driving_direction_compliance_statistics

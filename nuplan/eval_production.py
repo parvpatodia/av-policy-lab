@@ -33,6 +33,7 @@ nest_asyncio.apply()
 
 import argparse
 import json
+import shutil
 import traceback
 import warnings
 from pathlib import Path
@@ -54,6 +55,10 @@ REPO_ROOT        = Path('/Users/parvpatodia/Desktop/diffusion-policy-zoo')
 CKPT_DIR         = REPO_ROOT / 'nuplan' / 'checkpoints'
 SIM_OUT          = REPO_ROOT / 'nuplan' / 'sim_results'
 EVAL_OUT         = REPO_ROOT / 'nuplan' / 'eval_results'
+# WHY: project-local hydra config dir. Holds simulation_metric/prod_eval_metrics.yaml,
+# a composed metric set (common_metrics L2 + the PDM components) that a plain
+# devkit override cannot express. Added to hydra.searchpath in build_cfg().
+REPO_CONFIG_DIR  = REPO_ROOT / 'nuplan' / 'config'
 
 CKPT_BC          = str(CKPT_DIR / 'bc_best.pt')
 CKPT_GOALBC      = str(CKPT_DIR / 'goal_bc.pt')
@@ -198,23 +203,24 @@ def build_cfg(experiment_name: str, n_scenarios: int):
             'worker=sequential',
             'ego_controller=perfect_tracking_controller',
             'observation=box_observation',
-            # WHY simulation_metric=simulation_closed_loop_nonreactive_agents:
-            # The default config (simulation_metric=default_metrics -> common_metrics)
-            # only emits ego_mean_speed, ego_expert_l2_error, ego_expert_l2_error_with_yaw.
-            # That is why prior runs produced ONLY those three parquets and no driving-quality
-            # metrics. This option enables nuPlan's full closed-loop metric set: the seven
-            # PDM-Score components (no_ego_at_fault_collisions, drivable_area_compliance,
-            # driving_direction_compliance, ego_progress_along_expert_route,
-            # time_to_collision_within_bound, ego_is_comfortable, speed_limit_compliance)
-            # plus ego_is_making_progress and the low-level dynamics metrics they depend on.
-            # WHY nonreactive (not reactive): this eval uses observation=box_observation,
-            # i.e. background agents replay their logged tracks (non-reactive). The reactive
-            # variant is paired with idm_agents observation. The metric *set* is identical
-            # between the two configs; we match the nonreactive name to the observation type.
-            # Verified by reading the nuplan-devkit config group at
-            # nuplan/planning/script/config/common/simulation_metric/.
-            'simulation_metric=simulation_closed_loop_nonreactive_agents',
-            f'hydra.searchpath=[{paths.common_dir}, {paths.experiment_dir}]',
+            # WHY simulation_metric=prod_eval_metrics (project-local composed set):
+            # Selecting a single devkit option (e.g. simulation_closed_loop_nonreactive_agents)
+            # REPLACES the simulation_metric defaults LIST, dropping common_metrics — so a run
+            # gets the 7 PDM components but NO ego_expert_L2_error parquet, and parse_results()
+            # then fails. And composing both via simulation_metric=[common_metrics,
+            # simulation_closed_loop_nonreactive_agents] does NOT work either: both define a
+            # `low_level:` key, so Hydra's defaults-list merge makes the second OVERRIDE the
+            # first instead of concatenating (this is why the devkit's nonreactive config keeps
+            # `# - common_metrics` commented out). prod_eval_metrics.yaml merges every low_level
+            # + high_level statistic from BOTH groups into one block, so ONE run emits BOTH the
+            # L2 metrics (ego_mean_speed, ego_expert_l2_error[_with_yaw]) AND the 7 PDM-Score
+            # components plus ego_is_making_progress. It lives in REPO_CONFIG_DIR/simulation_metric/
+            # which is appended to hydra.searchpath below.
+            # WHY nonreactive metric defs (not reactive): this eval uses observation=box_observation,
+            # i.e. background agents replay their logged tracks (non-reactive). The metric set is
+            # identical between the two; we match the nonreactive components to the observation type.
+            'simulation_metric=prod_eval_metrics',
+            f'hydra.searchpath=[{paths.common_dir}, {paths.experiment_dir}, file://{REPO_CONFIG_DIR}]',
             'output_dir=${group}/${experiment}',
             'scenario_builder=nuplan_mini',
             # WHY db_files=DB_DIR (directory, not single file): passing the directory
@@ -242,6 +248,24 @@ def run_simulation(planner, experiment_name: str, n_scenarios: int) -> bool:
     Returns True on success, False on failure.
     """
     from nuplan.planning.script.run_simulation import run_simulation as main_sim
+
+    # WHY wipe the experiment dir first: nuPlan does NOT clean its metrics output
+    # between runs. A prior run's ego_expert_L2_error.parquet would otherwise survive
+    # alongside this run's freshly-written PDM parquets, and parse_results()/pdm_score.py
+    # would silently mix metrics from two different runs (different scenarios, different
+    # timestamps). Deleting the dir guarantees every run starts clean and no stale parquet
+    # can ever be read. Guard: only ever rmtree a path that lives under SIM_OUT.
+    exp_dir = (SIM_OUT / experiment_name).resolve()
+    sim_out_resolved = SIM_OUT.resolve()
+    if exp_dir.exists():
+        if sim_out_resolved in exp_dir.parents:
+            shutil.rmtree(exp_dir)
+            print(f'    Cleaned stale output dir: {exp_dir}', flush=True)
+        else:
+            raise RuntimeError(
+                f'Refusing to delete {exp_dir}: not under SIM_OUT ({sim_out_resolved}).'
+            )
+
     cfg = build_cfg(experiment_name, n_scenarios)
     print(f'\n>>> Running {planner.name()} ({n_scenarios} scenarios) ...', flush=True)
     main_sim(cfg, planner)
