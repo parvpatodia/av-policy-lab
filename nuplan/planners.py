@@ -36,7 +36,11 @@ from nuplan.planning.simulation.planner.abstract_planner import (
 from nuplan.planning.simulation.trajectory.interpolated_trajectory import InterpolatedTrajectory
 
 FUTURE_STEPS = 16
-DT           = 0.1   # nuPlan 10 Hz
+DT           = 0.1   # Trajectory waypoint spacing (s). nuPlan sim calls planner at ~10 Hz.
+# NOTE: The nuPlan mini SQLite DB is at 100 Hz (10 ms/row), not 10 Hz.
+#       Training targets are raw consecutive rows (0.01 s apart). DT=0.1 stamps
+#       them 10× further apart. perfect_tracking_controller executes by spatial
+#       position, so this mismatch does not affect L2 in practice. See verify_pipeline.py.
 
 
 # ── Model architecture ────────────────────────────────────────────────────────
@@ -799,8 +803,14 @@ class GoalBCPlanner(AbstractPlanner):
         self._sorted_ts = sorted(self._expert.keys())
 
     def _get_expert_at_offset(self, current_ts_us: int, offset_steps: int = 8) -> Tuple[float, float, float]:
-        """Return expert (x, y, yaw) at current_ts + offset_steps * 100ms."""
-        target_ts = current_ts_us + offset_steps * 100_000   # WHY: nuPlan 10Hz -> 100ms/step
+        """Return expert (x, y, yaw) at current_ts + offset_steps * 100 ms.
+
+        NOTE: The DB is 100 Hz (10 ms/row). offset_steps here is in 100 ms simulation
+        steps (nuPlan calls the planner at ~10 Hz). offset_steps=8 → T+0.8 s at inference,
+        which is 10× the training goal horizon (GOAL_OFFSET=8 raw rows × 10 ms = 0.08 s).
+        See verify_pipeline.py Check 3.
+        """
+        target_ts = current_ts_us + offset_steps * 100_000   # 100_000 µs = 100 ms = 1 sim step
         idx = int(np.searchsorted(self._sorted_ts, target_ts))
         idx = min(idx, len(self._sorted_ts) - 1)
         return self._expert[self._sorted_ts[idx]]
