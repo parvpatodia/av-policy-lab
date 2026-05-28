@@ -37,10 +37,11 @@
 | BCPlanner | 27.18m | 16.99m | 28.19 | 14/30 | 12/30 |
 | RouteMapBCPlanner | 47.36m | 53.57m | 25.43 | 26/30 | 0/30 |
 
-**SpeedAdaptive wins 17/30 scenarios over IDM (57% win rate). Better median (7.50 vs 8.50m).**
-Mean is worse (18.19 vs 13.97m) due to 4 catastrophic tail failures (L2: 55.7, 80.3, 85.3, 121.2m).
-Root cause of tail failures: route centerline goes straight at intersections where expert turns.
-**Without 4 tails: SpeedAdaptive mean ≈ 8.5m — beats IDM.**
+**SpeedAdaptive is STATISTICALLY TIED with IDM** (binomial p=0.585, Wilcoxon p=0.761,
+median-diff CI [−10.3, +6.4] includes 0). We do NOT claim it beats IDM. The story is the
+distribution: 4/30 scenarios carry 63% of total L2 mass (all intersection turns where the
+centerline goes straight while expert turns). Trimmed-4 mean: SA 7.81m vs IDM 9.08m.
+Defensible claim: deploy-time-only policy reaches parity with tuned IDM; one fixable failure mode.
 
 ### Single-log 3-scenario results (for reference)
 | Policy | 3-scen L2 | Notes |

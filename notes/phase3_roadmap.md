@@ -167,11 +167,15 @@ Single-log 3-scenario results (goal_bc.ipynb, eval_routemapbc.py, eval_speed_ada
 | BC | 27.18m | 16.99m | 28.19 | 14/30 | 12/30 | — |
 | RouteMapBC | 47.36m | 53.57m | 25.43 | 26/30 | 0/30 | — |
 
-**Critical finding from 30-scenario eval:**
-SpeedAdaptive wins **17/30 scenarios** over IDM (57% win rate) and has a **better median** (7.50m vs 8.50m).
-The worse mean (18.19m vs 13.97m) is driven by **4 catastrophic outliers** (L2: 55.7, 80.3, 85.3, 121.2m)
-where IDM scores 2.8–7.8m. Root cause: route centerline goes straight at intersections where the expert turns.
-**Without these 4 outliers, SpeedAdaptive mean ≈ 8.5m — beating IDM.**
+**Critical finding from 30-scenario eval (statistically honest):**
+SpeedAdaptive is **statistically TIED with IDM** — exact binomial on the 17/30 win rate p=0.585,
+paired Wilcoxon p=0.761, median-difference 95% bootstrap CI [−10.3, +6.4] includes zero
+(`statistical_analysis.py`). We do NOT claim it beats IDM at n=30.
+The result is in the **distribution**: 4 of 30 scenarios carry **63% of total L2 mass**
+(L2: 55.7, 80.3, 85.3, 121.2m), all intersection-turn scenarios where the centerline route
+goes straight while the expert turns. Trimmed-4 mean: SA 7.81m vs IDM 9.08m.
+**Defensible claim: a deploy-time-only policy reaches parity with tuned IDM, with one
+localized, fixable failure mode (intersection topology → Phase 3c''').**
 
 The distribution is bimodal:
 - 12/30 scenarios: L2 < 5m (excellent, comparable to GoalBC oracle)

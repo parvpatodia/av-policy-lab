@@ -60,16 +60,16 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`. Same 
 
 30 scenarios sampled from all 64 nuPlan mini logs. `eval_production.py`. Run: May 28 2026.
 
-| Policy | Mean | Median | Std | Fail >20m | Good <5m | vs IDM (per-scen) |
+| Policy | Mean | Median | Trim-4 mean | Std | Fail >20m | Good <5m |
 |---|---|---|---|---|---|---|
-| **SpeedAdaptiveRouteMapBC** | **18.19m** | **7.50m** | 28.57 | 6/30 | 12/30 | **wins 17/30** |
-| IDMPlanner | 13.97m | 8.50m | 16.26 | 8/30 | 12/30 | — |
-| BCPlanner | 27.18m | 16.99m | 28.19 | 14/30 | 12/30 | — |
-| RouteMapBCPlanner | 47.36m | 53.57m | 25.43 | 26/30 | 0/30 | — |
+| **SpeedAdaptiveRouteMapBC** | 18.19m | **7.50m** | **7.81m** | 28.57 | 6/30 | 12/30 |
+| IDMPlanner | 13.97m | 8.50m | 9.08m | 16.26 | 8/30 | 12/30 |
+| BCPlanner | 27.18m | 16.99m | — | 28.19 | 14/30 | 12/30 |
+| RouteMapBCPlanner | 47.36m | 53.57m | — | 25.43 | 26/30 | 0/30 |
 
 **GoalBC oracle: 1.820m** (3-scenario single-log — not re-run in production eval to avoid per-scenario DB mismatch).
 
-**Key insight from 30-scenario distribution:** SpeedAdaptive wins 17/30 scenarios over IDM and has a better median (7.50m vs 8.50m). The worse mean (18.19 vs 13.97m) is caused by **4 catastrophic outliers** (L2: 55.7, 80.3, 85.3, 121.2m) where IDM scores 2.8–7.8m. Root cause: route centerline follows straight at intersections where the expert turns. Without these 4 tail failures, SpeedAdaptive mean ≈ **8.5m — beating IDM**. The policy is bimodal: excellent on straight-road scenarios, catastrophic at intersection topology.
+**Honest statistical reading (`statistical_analysis.py`):** SpeedAdaptive is **statistically TIED with IDM**, not better — exact binomial on win rate p=0.585, paired Wilcoxon p=0.761, median-difference 95% bootstrap CI [−10.3, +6.4] includes zero. We do **not** claim it beats IDM. The interesting result is the *distribution*: SpeedAdaptive's deficit is concentrated in **4 of 30 scenarios that carry 63% of its total L2 mass** (L2: 55.7, 80.3, 85.3, 121.2m), all intersection-turn scenarios where the centerline route goes straight while the expert turns. After dropping those 4, the trimmed mean (7.81m) edges below IDM (9.08m). The defensible claim: **a policy with no expert data at inference reaches parity with tuned IDM, with a single localized, fixable failure mode (intersection topology → Phase 3c''' `route_roadblock_ids`).**
 
 **Key finding — covariate shift:** BC achieves 0.058m open-loop ADE (predicting from ground-truth states) but 49.4m closed-loop L2 (850x worse). Error compounds at every step because the model was never trained on states it caused itself.
 

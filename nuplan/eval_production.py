@@ -185,6 +185,22 @@ def build_cfg(experiment_name: str, n_scenarios: int):
             'worker=sequential',
             'ego_controller=perfect_tracking_controller',
             'observation=box_observation',
+            # WHY simulation_metric=simulation_closed_loop_nonreactive_agents:
+            # The default config (simulation_metric=default_metrics -> common_metrics)
+            # only emits ego_mean_speed, ego_expert_l2_error, ego_expert_l2_error_with_yaw.
+            # That is why prior runs produced ONLY those three parquets and no driving-quality
+            # metrics. This option enables nuPlan's full closed-loop metric set: the seven
+            # PDM-Score components (no_ego_at_fault_collisions, drivable_area_compliance,
+            # driving_direction_compliance, ego_progress_along_expert_route,
+            # time_to_collision_within_bound, ego_is_comfortable, speed_limit_compliance)
+            # plus ego_is_making_progress and the low-level dynamics metrics they depend on.
+            # WHY nonreactive (not reactive): this eval uses observation=box_observation,
+            # i.e. background agents replay their logged tracks (non-reactive). The reactive
+            # variant is paired with idm_agents observation. The metric *set* is identical
+            # between the two configs; we match the nonreactive name to the observation type.
+            # Verified by reading the nuplan-devkit config group at
+            # nuplan/planning/script/config/common/simulation_metric/.
+            'simulation_metric=simulation_closed_loop_nonreactive_agents',
             f'hydra.searchpath=[{paths.common_dir}, {paths.experiment_dir}]',
             'output_dir=${group}/${experiment}',
             'scenario_builder=nuplan_mini',

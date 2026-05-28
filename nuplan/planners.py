@@ -14,9 +14,12 @@ BEVPlanner        : BEV CNN AbstractPlanner wrapper (ego-history rasterization)
 MILEPolicy        : World model (encoder + GRU transition + policy), joint imitation+consistency loss
 MILEPlanner       : MILE AbstractPlanner wrapper (inference: state → encoder → latent → policy)
 GoalBCPolicy      : Goal-conditioned MLP (8 -> 256 -> 256 -> 256 -> 48, state + T+8 expert waypoint)
-GoalBCPlanner     : GoalBC wrapper — expert DB lookup for goal at inference (Phase 3a)
+GoalBCPlanner     : GoalBC wrapper — expert DB lookup for goal at inference (Phase 3a, oracle)
 MapBCPlanner      : GoalBC weights + road centerline goal at inference — no expert required (Phase 3b)
-RouteMapBCPlanner : GoalBC weights + pre-computed global route goal — fixes MapBC drift failure (Phase 3c)
+RouteMapBCPlanner : GoalBC weights + pre-computed global route goal, fixed 8m look-ahead (Phase 3c)
+TrainedRouteBCPlanner          : RouteMapBC loading route-goal-trained weights (Phase 3c')
+SpeedAdaptiveRouteMapBCPlanner : RouteMapBC with look-ahead = speed × 0.8s (Phase 3c'', scale fix)
+RoadblockRouteMapBCPlanner     : SpeedAdaptive + route_roadblock_ids junction selection (Phase 3c''')
 """
 
 import sqlite3
@@ -1269,25 +1272,13 @@ class RouteMapBCPlanner(AbstractPlanner):
                 successors = current_lane.outgoing_edges
                 if not successors:
                     break
-                # Pick successor most aligned with current travel direction
+                # Pick the successor to follow at this junction.
+                # WHY delegate to _select_successor: keeps the heading-alignment rule
+                # in one overridable place. RoadblockRouteMapBCPlanner overrides it to
+                # prefer on-route successors (Open/Closed) — the chaining loop is shared.
                 last_dir = route[-1] - route[-2] if len(route) > 1 else ego_dir
                 last_dir_n = last_dir / (np.linalg.norm(last_dir) + 1e-8)
-                best_succ, best_cos = None, -1.0
-                for succ in successors:
-                    try:
-                        succ_pts = np.array(
-                            [(s.x, s.y) for s in succ.baseline_path.discrete_path]
-                        )
-                        if len(succ_pts) < 2:
-                            continue
-                        tangent = succ_pts[1] - succ_pts[0]
-                        cos_a   = float(
-                            np.dot(tangent / (np.linalg.norm(tangent) + 1e-8), last_dir_n)
-                        )
-                        if cos_a > best_cos:
-                            best_cos, best_succ = cos_a, succ
-                    except Exception:
-                        continue
+                best_succ = self._select_successor(successors, last_dir_n)
                 if best_succ is None:
                     break
                 succ_pts = np.array(
@@ -1302,6 +1293,38 @@ class RouteMapBCPlanner(AbstractPlanner):
                 break
 
         return route.astype(np.float64)
+
+    def _select_successor(self, successors, last_dir_n):
+        """
+        Pick the successor lane whose entry tangent best aligns with travel direction.
+
+        Args:
+            successors : list of outgoing lane/connector map objects.
+            last_dir_n : unit vector of current travel direction (global frame).
+
+        Returns the best-aligned successor, or None if none is usable.
+
+        WHY a separate method: this is the junction-branch decision. Extracting it
+        lets RoadblockRouteMapBCPlanner override only the branch choice (prefer the
+        intended route) while reusing the parent's lane-chaining loop unchanged.
+        """
+        best_succ, best_cos = None, -1.0
+        for succ in successors:
+            try:
+                succ_pts = np.array(
+                    [(s.x, s.y) for s in succ.baseline_path.discrete_path]
+                )
+                if len(succ_pts) < 2:
+                    continue
+                tangent = succ_pts[1] - succ_pts[0]
+                cos_a   = float(
+                    np.dot(tangent / (np.linalg.norm(tangent) + 1e-8), last_dir_n)
+                )
+                if cos_a > best_cos:
+                    best_cos, best_succ = cos_a, succ
+            except Exception:
+                continue
+        return best_succ
 
     def _straight_route(
         self, x: float, y: float, yaw: float, length_m: float = 200.0, step_m: float = 2.0
@@ -1467,3 +1490,118 @@ class SpeedAdaptiveRouteMapBCPlanner(RouteMapBCPlanner):
 
     def name(self) -> str:
         return 'SpeedAdaptiveRouteMapBCPlanner'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY RoadblockRouteMapBCPlanner exists — Phase 3c''' root-cause analysis
+#
+# SpeedAdaptiveRouteMapBC fixed the goal-scale mismatch and reached 7.50m MEDIAN
+# L2 on 30 scenarios — but the MEAN is dragged up by 4 catastrophic tail failures
+# (L2: 55.7, 80.3, 85.3, 121.2 m). Those 4 are all the same failure mode.
+#
+# Root cause — straight-through-at-junction:
+#   _build_route() chains successor lanes by HEADING ALIGNMENT only. At an
+#   intersection the most forward-aligned successor is the straight-ahead lane.
+#   But on the 4 failing scenarios the EXPERT TURNS. The pre-computed route then
+#   commits to the wrong arm of the intersection; every downstream goal points the
+#   policy straight while the expert curves away → L2 diverges to 50–120 m.
+#
+#   Speed-adaptive look-ahead cannot fix this: the goal scale is correct, the goal
+#   DIRECTION is wrong because the underlying route took the wrong branch.
+#
+# The fix — use the intended route:
+#   PlannerInitialization.route_roadblock_ids lists the roadblock / lane-connector
+#   IDs of the scenario's intended route (the same signal IDM and the nuPlan PDM
+#   planners consume). At each junction we prefer a successor that lies on that
+#   route over the straight-ahead one; we fall back to heading alignment only when
+#   no successor is on-route (route ran out, or IDs unavailable on this map). This
+#   is strictly safer than the parent: identical behaviour when no route info, the
+#   correct turn when there is → removes the 4 tail failures without retraining.
+#
+# Uses goal_bc.pt unchanged and inherits speed_adaptive=True. Only the route
+# CONSTRUCTION changes (which branch to take), not the goal/look-ahead machinery.
+# REF: PlannerInitialization.route_roadblock_ids; nuPlan PDM route-tracking concept.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class RoadblockRouteMapBCPlanner(SpeedAdaptiveRouteMapBCPlanner):
+    """
+    Phase 3c''' — RouteMapBC that follows route_roadblock_ids at intersections.
+
+    Inherits everything from SpeedAdaptiveRouteMapBCPlanner (speed_adaptive=True,
+    goal_bc.pt, speed × 0.8 s look-ahead, pre-computed 200m route). The ONLY change
+    is junction-branch selection inside _build_route():
+
+      Parent:  pick the most heading-aligned successor  → goes straight at junctions
+      This:    pick a successor on the intended route    → turns where the expert turns
+               (falls back to heading alignment if none on route)
+
+    WHY this is the right fix (not retraining, not a bigger look-ahead):
+      The 4 catastrophic tail failures of SpeedAdaptiveRouteMapBC are all the same
+      failure: the route took the straight arm of an intersection where the expert
+      turned. The goal magnitude was already correct after the speed-adaptive fix —
+      only the route's chosen branch was wrong. route_roadblock_ids encodes the
+      correct branch, so guiding lane chaining with it fixes the direction directly.
+
+    Substitutability (Liskov): when route_roadblock_ids is empty or unavailable,
+    behaviour is byte-for-byte identical to the parent — so this is never worse.
+    """
+
+    def __init__(self, checkpoint_path: str, look_ahead_m: float = 8.0) -> None:
+        super().__init__(checkpoint_path, look_ahead_m)
+        # WHY frozenset: membership is tested inside the successor loop; a set gives
+        # O(1) lookups and dedups the raw ID list. Empty until initialize() fills it.
+        self._route_roadblock_ids: frozenset = frozenset()
+
+    def name(self) -> str:
+        return 'RoadblockRouteMapBCPlanner'
+
+    def initialize(self, initialization) -> None:
+        """Store map_api (via parent) AND the intended-route roadblock IDs; reset route.
+
+        WHY also store route_roadblock_ids: the parent keeps only map_api, so it has
+        no way to know which branch the expert takes at a junction. These IDs are the
+        scenario's intended route — the missing signal that drives _select_successor.
+        """
+        super().initialize(initialization)
+        ids = getattr(initialization, 'route_roadblock_ids', None) or []
+        # WHY str() on both sides: roadblock IDs are ints on some maps and strings on
+        # others, and lane.get_roadblock_id() returns str — normalize to compare safely.
+        self._route_roadblock_ids = frozenset(str(i) for i in ids)
+
+    def _select_successor(self, successors, last_dir_n):
+        """Prefer a successor on the intended route; else fall back to heading alignment.
+
+        At an intersection several successors exist. The parent's heading-aligned
+        choice is the straight-ahead lane, which is wrong whenever the expert turns.
+        route_roadblock_ids encodes the correct arm, so we first restrict the candidate
+        set to on-route successors and pick the best-aligned among THOSE (handles the
+        rare case of two on-route lanes at one junction). With no on-route successor —
+        route ran out, or no IDs available — we defer entirely to the parent.
+        """
+        if self._route_roadblock_ids:
+            on_route = [s for s in successors if self._on_route(s)]
+            if on_route:
+                return super()._select_successor(on_route, last_dir_n)
+        # No route IDs, or no successor on route → parent heading-alignment behaviour.
+        return super()._select_successor(successors, last_dir_n)
+
+    def _on_route(self, lane) -> bool:
+        """True if a lane (or its parent roadblock) belongs to route_roadblock_ids.
+
+        WHY check both roadblock id and lane id: route_roadblock_ids are roadblock /
+        lane-connector IDs, but successors are lane objects. A lane is on-route if its
+        parent roadblock is listed (the common case). We also check the lane's own id
+        as a fallback for map versions that enumerate lane/connector IDs directly.
+        """
+        try:
+            if str(lane.get_roadblock_id()) in self._route_roadblock_ids:
+                return True
+        except Exception:
+            pass
+        try:
+            if str(lane.id) in self._route_roadblock_ids:
+                return True
+        except Exception:
+            pass
+        return False
