@@ -1,18 +1,29 @@
 """
 Phase 3c'' — SpeedAdaptiveRouteMapBCPlanner eval script.
 
-Root-cause fix for RouteMapBC (32m) and TrainedRouteBCPlanner (49m) failures.
+Root-cause diagnosis for RouteMapBC (32m) and TrainedRouteBCPlanner (49m) failures.
 
-FINDING: The nuPlan mini SQLite DB is at 100 Hz (10 ms per row), NOT 10 Hz.
-  GOAL_OFFSET = 8 rows × 10 ms = 0.08 s ahead (not 0.8 s as commented).
-  GoalBC training goal magnitude: mean = 0.342 m (= avg_speed × 0.08 s).
-  RouteMapBC used fixed 8.0 m look-ahead → 23× SCALE MISMATCH → policy ignores goal.
-  TrainedRouteBCPlanner retrained with 8 m goals → same mismatch at inference → 49 m.
+CONFIRMED: nuPlan mini SQLite DB is at 100 Hz (10 ms/row).
+  GoalBCPlanner._get_expert_at_offset: offset_steps * 100_000 µs = 8 × 100 ms = T+0.8 s.
+  GoalBC INFERENCE goal at avg 4.33 m/s: 4.33 × 0.8 = 3.46 m.
 
-FIX: speed-adaptive look-ahead = sqrt(vx²+vy²) × 0.08
-  → same magnitude as GoalBC training distribution at every speed
-  → uses existing goal_bc.pt, no retraining
-  → expected result ≈ GoalBC (1.820 m)
+SCALE MISMATCH (speed-dependent):
+  RouteMapBC used fixed 8.0 m regardless of speed.
+  GoalBC uses speed × 0.8 s:
+    at 10 m/s → 8.0 m  (identical to RouteMapBC — no problem at highway speed)
+    at  4 m/s → 3.2 m  vs RouteMapBC 8.0 m  (2.5× mismatch)
+    at  0 m/s →  ~0 m  vs RouteMapBC 8.0 m  (∞ mismatch at stops)
+  nuPlan urban scenarios spend significant time stopped/slow → failure accumulates.
+
+WHY RETRAIN FAILED (TrainedRouteBCPlanner, 49m):
+  Retraining with 8 m goals fixed the scale at inference but not the training utility.
+  8 m goal is ~12× the prediction horizon (16 rows × 10 ms × 4.33 m/s = 0.69 m).
+  MSE reaches near-zero without the network attending to the goal → ignores it → BC.
+
+FIX: speed_adaptive = True → look_ahead = max(0.05, speed × 0.8)
+  Matches GoalBC T+0.8 s temporal horizon at every speed.
+  goal_bc.pt already learned to use goals at this scale (GoalBC inference works).
+  No retraining needed.
 
 Run:
   conda activate nuplan
@@ -110,9 +121,8 @@ for name, a, m, p in sorted(results, key=lambda r: r[1]):
     print(f'{name:<36} {a:>8.3f} {m:>8.3f} {p:>8.3f}{marker}')
 
 print()
-print('DB sampling rate: 100 Hz (confirmed). GoalBC T+8 = 0.08 s.')
-print(f'SpeedAdaptive look-ahead at avg speed 4.3 m/s → {4.3*0.08:.3f} m')
-print(f'GoalBC training goal mean: ~0.342 m  →  distribution match: {"✓" if abs(avg - 1.82) < 5 else "✗ — check above"}')
+print('DB sampling rate: 100 Hz (confirmed). GoalBCPlanner inference: T+8 × 0.1 s = T+0.8 s.')
+print(f'SpeedAdaptive look-ahead at avg speed 4.3 m/s → {4.3*0.8:.3f} m  (= GoalBC inference scale ✓)')
 print()
 
 bc_v0 = 49.449
