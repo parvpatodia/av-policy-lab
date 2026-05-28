@@ -1358,3 +1358,159 @@ class TrainedRouteBCPlanner(RouteMapBCPlanner):
 
     def name(self) -> str:
         return 'TrainedRouteBCPlanner'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY SpeedAdaptiveRouteMapBCPlanner exists — root-cause explanation
+#
+# The nuPlan mini SQLite DB is sampled at 100 Hz (10 ms between rows), NOT 10 Hz
+# as incorrectly commented in bc_pipeline.ipynb. Verified by timestamp deltas:
+#   dt[0] = 9893 µs ≈ 10 ms → 100 Hz.
+#
+# Consequence for training:
+#   GOAL_OFFSET = 8 rows × 10 ms = 0.08 s ahead (not 0.8 s)
+#   At average driving speed ~4.33 m/s: T+8 displacement ≈ 4.33 × 0.08 = 0.35 m
+#   Measured GoalBC goal magnitude: mean=0.342 m  ← matches ✓
+#
+# Consequence for RouteMapBC failure (32.085 m):
+#   RouteMapBCPlanner used fixed look_ahead_m = 8.0 m.
+#   GoalBC weights were trained on goals of mean 0.342 m.
+#   Ratio: 8.0 / 0.342 = 23× SCALE MISMATCH.
+#   Policy trained on 0.35 m goals completely ignores 8 m goals → reverts to BC.
+#
+# Consequence for TrainedRouteBCPlanner failure (49.034 m):
+#   Retrained with ROUTE_GOAL_DIST = 8.0 m at training.
+#   At inference, RouteMapBC also uses 8.0 m look-ahead.
+#   Scale matches at 8 m (no mismatch) — but now the POLICY learned to use 8 m
+#   goals with near-zero lateral variance (std/mean ≈ 2.4%).
+#   When drifted off-road, route-goal lateral signal (dy ≈ 5 m) is out of the
+#   training distribution where dy ≈ ±0.3 m → policy ignores it → 49 m.
+#
+# The fix: speed-adaptive look-ahead = speed × 0.08 s
+#   At any speed, goal = T+8 equivalent distance = matches GoalBC training exactly.
+#   Uses existing goal_bc.pt — no retraining needed.
+#   At 10 m/s: look_ahead = 0.8 m (compact, precise)
+#   At  4 m/s: look_ahead = 0.32 m (≈ GoalBC training mean)
+#   When drifted 5 m right at 4 m/s: goal ≈ (0.32, −5) — same as GoalBC in same
+#   scenario → policy generalizes the same way → recovery signal works.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The T+8 time window in SECONDS (DB is 100 Hz, GOAL_OFFSET=8 rows × 10 ms).
+# Used to convert instantaneous speed → equivalent look-ahead distance.
+_GOAL_LOOKAHEAD_S: float = 8 * 0.01   # = 0.08 s
+
+
+class SpeedAdaptiveRouteMapBCPlanner(RouteMapBCPlanner):
+    """
+    Phase 3c'' — SpeedAdaptiveRouteMapBC: fix for RouteMapBC scale mismatch.
+
+    ROOT CAUSE (why RouteMapBC got 32m and TrainedRouteBC got 49m):
+      The DB is at 100 Hz. GOAL_OFFSET=8 rows = 0.08 s.
+      GoalBC training goals have mean=0.342 m (speed × 0.08 s at avg 4.33 m/s).
+      Both prior planners used fixed 8.0 m look-ahead → 23× scale mismatch.
+      Policy ignores goals that are 23× larger than its training distribution.
+
+    FIX:
+      look_ahead = speed × 0.08  (speed-adaptive, matches GoalBC training exactly)
+      No retraining needed — uses existing goal_bc.pt weights unchanged.
+      At 4 m/s: look_ahead = 0.32 m ≈ GoalBC training mean ✓
+      At 10 m/s: look_ahead = 0.8 m ≈ GoalBC at highway speeds ✓
+
+    WHY this works for recovery:
+      Ego drifts 5 m right, speed = 4 m/s, look_ahead = 0.32 m.
+      Route goal: nearest route point 0.32 m ahead → in ego-frame ≈ (0.32, −5).
+      GoalBC at same drift: expert T+8 ≈ (0.32, −5). Identical signal.
+      GoalBC policy generalizes to this goal → recovery. SpeedAdaptive uses same
+      weights and same scale → same recovery behavior. No training needed.
+
+    WHY it's deployable:
+      GoalBCPlanner requires expert DB at inference (not deployable).
+      SpeedAdaptiveRouteMapBC uses the pre-computed route (HD map) — no expert.
+      Inference semantics = GoalBC. Source = map. Deployable.
+    """
+
+    def name(self) -> str:
+        return 'SpeedAdaptiveRouteMapBCPlanner'
+
+    def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
+        ego = current_input.history.current_state[0]
+        x_g = ego.rear_axle.x
+        y_g = ego.rear_axle.y
+        yaw = ego.rear_axle.heading
+        dcs = ego.dynamic_car_state
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
+
+        if self._route_pts is None:
+            self._route_pts = self._build_route(ego, self._map_api)
+
+        # Speed-adaptive look-ahead: T+8 equivalent distance in metres.
+        # WHY max(0.05, ...): at a full stop (vx≈0), 0.05m gives a stable forward
+        # nudge so the goal stays in front of the ego and doesn't NaN-divide.
+        speed = float(np.sqrt(vx ** 2 + vy ** 2))
+        look_ahead = max(0.05, speed * _GOAL_LOOKAHEAD_S)
+
+        dx_goal, dy_goal = self._get_route_goal(x_g, y_g, yaw, look_ahead)
+
+        feat = torch.tensor(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal],
+            dtype=torch.float32,
+        )
+        feat_norm = (feat - self._X_mean) / self._X_std
+
+        with torch.no_grad():
+            pred_norm = self._model(feat_norm.unsqueeze(0)).squeeze(0).numpy()
+        pred = (pred_norm * self._Y_std + self._Y_mean).reshape(FUTURE_STEPS, 3)
+
+        cos_h = np.cos(yaw)
+        sin_h = np.sin(yaw)
+        states = [ego]
+        for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
+            states.append(EgoState.build_from_rear_axle(
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
+                rear_axle_velocity_2d=StateVector2D(vx, vy),
+                rear_axle_acceleration_2d=StateVector2D(ax, ay),
+                tire_steering_angle=0.0,
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
+        return InterpolatedTrajectory(states)
+
+    # Override _get_route_goal to accept an explicit look_ahead_m argument.
+    # Parent version uses self._look_ahead_m (fixed). This version takes it as a param.
+    def _get_route_goal(    # type: ignore[override]
+        self, x: float, y: float, yaw: float,
+        look_ahead_m: Optional[float] = None
+    ) -> Tuple[float, float]:
+        if look_ahead_m is None:
+            look_ahead_m = self._look_ahead_m
+
+        if self._route_pts is None or len(self._route_pts) == 0:
+            return (float(look_ahead_m), 0.0)
+
+        dists = np.linalg.norm(self._route_pts - np.array([x, y]), axis=1)
+        i0    = int(np.argmin(dists))
+
+        cum    = 0.0
+        i_goal = min(i0 + 1, len(self._route_pts) - 1)
+        for i in range(i0, len(self._route_pts) - 1):
+            cum += float(np.linalg.norm(self._route_pts[i + 1] - self._route_pts[i]))
+            if cum >= look_ahead_m:
+                i_goal = i + 1
+                break
+        else:
+            i_goal = len(self._route_pts) - 1
+
+        gx, gy  = self._route_pts[i_goal]
+        cos_neg = np.cos(-yaw)
+        sin_neg = np.sin(-yaw)
+        return (
+            float(cos_neg * (gx - x) - sin_neg * (gy - y)),
+            float(sin_neg * (gx - x) + cos_neg * (gy - y)),
+        )

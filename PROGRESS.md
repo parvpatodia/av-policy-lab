@@ -58,7 +58,11 @@
 - `nuplan/trained_route_bc.ipynb` — full training pipeline (Cells 1–10)
 - `nuplan/planners.py` — `TrainedRouteBCPlanner` added (subclasses `RouteMapBCPlanner`)
 
-**Status:** Pipeline + planner complete. Run `trained_route_bc.ipynb` Cells 1-8 to train + eval. ~20 min on M5 Pro.
+**Status (updated):**
+- `trained_route_bc.ipynb` ran — **UNEXPECTED: 49.034m ≈ BC_v0** (retraining didn't help)
+- **Root cause found**: DB is 100 Hz, not 10 Hz. T+8 = 0.08s. GoalBC training goals = 0.342m mean. Fixed 8m look-ahead = **23× scale mismatch** → policy ignores goal.
+- **Fix added**: `SpeedAdaptiveRouteMapBCPlanner` — look_ahead = speed × 0.08s. No retraining. Uses `goal_bc.pt`.
+- **To run**: `python nuplan/eval_speed_adaptive.py` (~2 min). Expected ≈ GoalBC (1.82m).
 
 ## Today's Remaining Priorities (Wed May 28)
 1. **Run TrainedRouteBC**: open `trained_route_bc.ipynb`, run all cells, record result
