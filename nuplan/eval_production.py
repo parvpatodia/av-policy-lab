@@ -92,6 +92,7 @@ DEPLOYABLE_PLANNERS = {
     'MapBCPlanner',
     'RouteMapBCPlanner',
     'SpeedAdaptiveRouteMapBCPlanner',
+    'RoadblockRouteMapBCPlanner',
 }
 
 # ── Planner registry ──────────────────────────────────────────────────────────
@@ -111,6 +112,7 @@ def build_planners(selection: str) -> List[Tuple[str, object]]:
         GoalBCPlanner,
         RouteMapBCPlanner,
         SpeedAdaptiveRouteMapBCPlanner,
+        RoadblockRouteMapBCPlanner,
     )
 
     # Full ordered list: (cli_key, display_name, factory_fn)
@@ -122,12 +124,22 @@ def build_planners(selection: str) -> List[Tuple[str, object]]:
         ('idm',          'IDMPlanner',                    lambda: IDMPlanner()),
         ('routebc',      'RouteMapBCPlanner',             lambda: RouteMapBCPlanner(CKPT_ROUTEMAPBC)),
         ('speedadaptive','SpeedAdaptiveRouteMapBCPlanner', lambda: SpeedAdaptiveRouteMapBCPlanner(CKPT_SPEEDADAPTIVE)),
+        ('roadblock',    'RoadblockRouteMapBCPlanner',    lambda: RoadblockRouteMapBCPlanner(CKPT_SPEEDADAPTIVE)),
     ]
 
+    valid_keys = {r[0] for r in ALL}
     if selection == 'all':
-        selected_keys = {r[0] for r in ALL}
+        selected_keys = set(valid_keys)
     else:
         selected_keys = set(selection.split(','))
+        # WHY guard unknown keys: a typo'd planner name (e.g. 'roadblock' before it
+        # was registered) was silently ignored, wasting a full eval run on the wrong
+        # planner set. Fail loud instead.
+        unknown = selected_keys - valid_keys
+        if unknown:
+            print(f'[ERROR] Unknown planner key(s): {sorted(unknown)}. '
+                  f'Valid: {sorted(valid_keys)}')
+            return []
 
     result = []
     for cli_key, display_name, factory in ALL:
@@ -139,6 +151,7 @@ def build_planners(selection: str) -> List[Tuple[str, object]]:
             'goalbc':        CKPT_GOALBC,
             'routebc':       CKPT_ROUTEMAPBC,
             'speedadaptive': CKPT_SPEEDADAPTIVE,
+            'roadblock':     CKPT_SPEEDADAPTIVE,   # reuses goal_bc.pt weights
         }
         if cli_key in ckpt_map and not Path(ckpt_map[cli_key]).exists():
             print(f'[WARN] Skipping {display_name} — checkpoint not found: {ckpt_map[cli_key]}')

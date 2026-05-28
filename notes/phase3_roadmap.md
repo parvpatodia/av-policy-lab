@@ -128,16 +128,28 @@ data at inference → deployable policy claim.
 
 ---
 
-## Phase 3e — PDM-Score evaluation
+## Phase 3e — PDM-Score evaluation ✅ PIPELINE COMPLETE
 
 **Motivation:** L2 error measures trajectory deviation from expert but not driving quality.
-PDM-Score (nuPlan's official metric) measures: comfort (jerk), progress (did ego reach goal?),
-no_collision (contact with other agents). L2=1.82m is great but does GoalBC actually drive well?
+PDM-Score (nuPlan's official metric, Dauner et al. 2023) measures: comfort (jerk), progress,
+no_collision, drivable-area, TTC, speed-limit, direction. Does the policy actually *drive well*?
 
-**Plan:**
-- Implement PDM-Score via nuPlan's built-in metrics
-- Evaluate all Phase 3 planners on 20+ scenarios (not just 3)
-- Qualitative failure analysis: plot ego vs expert for each failure case
+**Done:** `pdm_score.py` parses + aggregates the 7 components; `eval_production.py` enables
+the `simulation_closed_loop_nonreactive_agents` metric set. 30-scenario results:
+
+| Planner | PDM-Score | no-collision | drivable | TTC | comfort |
+|---|---|---|---|---|---|
+| IDM | **0.656** | 0.850 | 0.833 | 0.767 | 0.633 |
+| SpeedAdaptiveRouteMapBC | 0.526 | 0.667 | 0.767 | 0.600 | **0.833** |
+| RouteMapBC | 0.342 | 0.600 | 0.533 | 0.567 | 0.467 |
+
+**Finding — comfort/safety trade-off:** IDM wins the composite, but SpeedAdaptive is
+**more comfortable** (0.833 vs 0.633) and trades away safety (collisions, TTC, drivable-area).
+The safety deficit co-locates with the L2 intersection tail. This is the sharpest framing
+of the contribution: learned policy = smoother; rule-based = safer at junctions.
+
+**Confirmed (`check_roadblock_availability.py`):** route_roadblock_ids populated on 30/30
+scenarios (mean 27.8 ids, string-typed) → Phase 3c''' fix has real route data to act on.
 
 ---
 
