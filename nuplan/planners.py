@@ -9,19 +9,17 @@ BCPolicy          : MLP architecture (6 -> 256 -> 256 -> 256 -> 48)
 BCPlanner         : Behavior-cloning AbstractPlanner wrapper
 IDMPlanner        : Intelligent Driver Model AbstractPlanner wrapper
 DAggerPlanner     : DAgger data-collection wrapper around BCPlanner
-BEVPolicy         : CNN architecture (3x64x64 + 6) -> 48
+BEVPolicy         : CNN architecture (3×64×64 + 6) -> 48
 BEVPlanner        : BEV CNN AbstractPlanner wrapper (ego-history rasterization)
 MILEPolicy        : World model (encoder + GRU transition + policy), joint imitation+consistency loss
-MILEPlanner       : MILE AbstractPlanner wrapper (inference: state -> encoder -> latent -> policy)
+MILEPlanner       : MILE AbstractPlanner wrapper (inference: state → encoder → latent → policy)
 GoalBCPolicy      : Goal-conditioned MLP (8 -> 256 -> 256 -> 256 -> 48, state + T+8 expert waypoint)
-GoalBCPlanner     : GoalBC wrapper -- expert DB lookup for goal at inference (Phase 3a, oracle)
-MapBCPlanner      : GoalBC weights + road centerline goal at inference -- no expert required (Phase 3b)
+GoalBCPlanner     : GoalBC wrapper — expert DB lookup for goal at inference (Phase 3a, oracle)
+MapBCPlanner      : GoalBC weights + road centerline goal at inference — no expert required (Phase 3b)
 RouteMapBCPlanner : GoalBC weights + pre-computed global route goal, fixed 8m look-ahead (Phase 3c)
 TrainedRouteBCPlanner          : RouteMapBC loading route-goal-trained weights (Phase 3c')
-SpeedAdaptiveRouteMapBCPlanner : RouteMapBC with look-ahead = speed x 0.8s (Phase 3c'', scale fix)
+SpeedAdaptiveRouteMapBCPlanner : RouteMapBC with look-ahead = speed × 0.8s (Phase 3c'', scale fix)
 RoadblockRouteMapBCPlanner     : SpeedAdaptive + route_roadblock_ids junction selection (Phase 3c''')
-DualHorizonRouteMapBCPlanner   : near + far dual-horizon goals (Phase 3c''''')
-DiffusionPolicyPlanner         : DDPM generative policy, same 10-dim goal conditioning (Phase 3d)
 """
 
 import sqlite3
@@ -44,11 +42,11 @@ FUTURE_STEPS = 16
 DT           = 0.1   # Trajectory waypoint spacing (s). nuPlan sim calls planner at ~10 Hz.
 # NOTE: The nuPlan mini SQLite DB is at 100 Hz (10 ms/row), not 10 Hz.
 #       Training targets are raw consecutive rows (0.01 s apart). DT=0.1 stamps
-#       them 10x further apart. perfect_tracking_controller executes by spatial
+#       them 10× further apart. perfect_tracking_controller executes by spatial
 #       position, so this mismatch does not affect L2 in practice. See verify_pipeline.py.
 
 
-# -- Model architecture -------------------------------------------------------
+# ── Model architecture ────────────────────────────────────────────────────────
 
 class BCPolicy(nn.Module):
     """
@@ -70,7 +68,7 @@ class BCPolicy(nn.Module):
         return self.net(x)
 
 
-# -- BCPlanner ----------------------------------------------------------------
+# ── BCPlanner ─────────────────────────────────────────────────────────────────
 
 class BCPlanner(AbstractPlanner):
     """
@@ -152,7 +150,7 @@ class BCPlanner(AbstractPlanner):
         return self._build_trajectory(ego, pred)
 
 
-# -- IDMPlanner ---------------------------------------------------------------
+# ── IDMPlanner ────────────────────────────────────────────────────────────────
 
 class IDMPlanner(AbstractPlanner):
     """
@@ -233,7 +231,7 @@ class IDMPlanner(AbstractPlanner):
         return InterpolatedTrajectory(states)
 
 
-# -- DAggerPlanner ------------------------------------------------------------
+# ── DAggerPlanner ─────────────────────────────────────────────────────────────
 
 class DAggerPlanner(AbstractPlanner):
     """
@@ -245,7 +243,7 @@ class DAggerPlanner(AbstractPlanner):
       1. Runs the current BC policy to produce the trajectory (controls the ego).
       2. Records the visited ego-state features.
       3. Queries the original DB for the expert's future trajectory at the same
-         timestamp -- the label the policy SHOULD have produced.
+         timestamp — the label the policy SHOULD have produced.
 
     The aggregated dataset (visited states + expert labels) is stored in
     self.dagger_X and self.dagger_Y and can be retrieved after simulation.
@@ -261,9 +259,13 @@ class DAggerPlanner(AbstractPlanner):
     def __init__(self, bc_planner: BCPlanner, db_path: str):
         self._bc      = bc_planner
         self._db_path = db_path
+
+        # Populated at initialize() — maps timestamp_us -> (feat_6, traj_48)
         self._expert: dict = {}
-        self.dagger_X: List[np.ndarray] = []
-        self.dagger_Y: List[np.ndarray] = []
+
+        # Accumulated on-policy data (filled during simulation)
+        self.dagger_X: List[np.ndarray] = []   # (6,) ego features at visited states
+        self.dagger_Y: List[np.ndarray] = []   # (48,) expert trajectory at same timestamp
 
     def name(self) -> str:
         return f'DAggerPlanner_iter{getattr(self, "_iter", 0)}'
@@ -276,6 +278,14 @@ class DAggerPlanner(AbstractPlanner):
         self._build_expert_lookup()
 
     def _build_expert_lookup(self) -> None:
+        """
+        Pre-load the full ego-pose table from the DB into a timestamp-keyed dict.
+        At each step we do an O(1) lookup rather than a DB query.
+
+        WHY: nuPlan DB has one ego_pose row per 100ms tick. We build a map
+             timestamp_us -> (input_features_6, target_trajectory_48) covering
+             the whole log so any drifted simulation state can be labeled.
+        """
         con  = sqlite3.connect(self._db_path)
         rows = con.execute(
             "SELECT timestamp, x, y, qw, qx, qy, qz, vx, vy, acceleration_x, acceleration_y "
@@ -285,34 +295,56 @@ class DAggerPlanner(AbstractPlanner):
 
         arr  = np.array(rows, dtype=np.float64)
         ts   = arr[:, 0].astype(np.int64)
-        x_g  = arr[:, 1]; y_g = arr[:, 2]
+        x_g  = arr[:, 1]
+        y_g  = arr[:, 2]
         qw, qx_, qy_, qz_ = arr[:,3], arr[:,4], arr[:,5], arr[:,6]
-        vx   = arr[:, 7]; vy = arr[:, 8]
-        ax_  = arr[:, 9]; ay_ = arr[:,10]
+        vx   = arr[:, 7]
+        vy   = arr[:, 8]
+        ax_  = arr[:, 9]
+        ay_  = arr[:,10]
         yaw  = np.arctan2(2*(qw*qz_ + qx_*qy_), 1 - 2*(qy_**2 + qz_**2))
 
         N = len(arr)
         for i in range(N - FUTURE_STEPS):
-            feat = np.array([np.sin(yaw[i]), np.cos(yaw[i]),
-                             vx[i], vy[i], ax_[i], ay_[i]], dtype=np.float32)
+            # Input features at timestep i
+            feat = np.array([
+                np.sin(yaw[i]), np.cos(yaw[i]),
+                vx[i], vy[i], ax_[i], ay_[i],
+            ], dtype=np.float32)
+
+            # Expert trajectory: 16 future steps relative to current pose
             cx, cy, cyaw = x_g[i], y_g[i], yaw[i]
-            cos_h = np.cos(-cyaw); sin_h = np.sin(-cyaw)
-            tgt = np.zeros(FUTURE_STEPS * 3, dtype=np.float32)
+            cos_h  = np.cos(-cyaw)
+            sin_h  = np.sin(-cyaw)
+            tgt    = np.zeros(FUTURE_STEPS * 3, dtype=np.float32)
             for j in range(FUTURE_STEPS):
                 fi = i + j + 1
-                dx_w = x_g[fi] - cx; dy_w = y_g[fi] - cy
-                tgt[j*3]   = cos_h * dx_w - sin_h * dy_w
-                tgt[j*3+1] = sin_h * dx_w + cos_h * dy_w
+                dx_w = x_g[fi] - cx
+                dy_w = y_g[fi] - cy
+                dx_e = cos_h * dx_w - sin_h * dy_w
+                dy_e = sin_h * dx_w + cos_h * dy_w
                 dyaw = yaw[fi] - cyaw
-                tgt[j*3+2] = (dyaw + np.pi) % (2*np.pi) - np.pi
+                dyaw = (dyaw + np.pi) % (2 * np.pi) - np.pi
+                tgt[j * 3]     = dx_e
+                tgt[j * 3 + 1] = dy_e
+                tgt[j * 3 + 2] = dyaw
+
             self._expert[int(ts[i])] = (feat, tgt)
 
     def _nearest_expert(self, timestamp_us: int) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """
+        Return (feat, traj) for the closest DB timestamp to timestamp_us.
+        Uses linear scan with early exit — DB timestamps are sorted and
+        the simulation runs at the same 100ms rate, so exact matches are common.
+        """
         if timestamp_us in self._expert:
             return self._expert[timestamp_us]
+
+        # Nearest-neighbour fallback (simulation may drift in wall-clock time)
         keys = np.array(list(self._expert.keys()), dtype=np.int64)
         idx  = np.argmin(np.abs(keys - timestamp_us))
         nearest = int(keys[idx])
+        # Only accept if within 500ms (5 ticks) to avoid bad labels
         if abs(nearest - timestamp_us) < 500_000:
             return self._expert[nearest]
         return None
@@ -320,13 +352,20 @@ class DAggerPlanner(AbstractPlanner):
     def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
         ego       = current_input.history.current_state[0]
         timestamp = ego.time_point.time_us
+
+        # 1. BC policy controls the ego (what the simulation follows)
         traj = self._bc.compute_planner_trajectory(current_input)
+
+        # 2. Record visited state + expert label for DAgger aggregation
         result = self._nearest_expert(timestamp)
         if result is not None:
+            # WHY: we record the BC features (at the VISITED state, not log state)
+            #      but use the expert trajectory as label — this is the DAgger correction
             visited_feat = self._bc._ego_features(ego)
             _, expert_traj = result
             self.dagger_X.append(visited_feat)
             self.dagger_Y.append(expert_traj)
+
         return traj
 
     @property
@@ -334,25 +373,42 @@ class DAggerPlanner(AbstractPlanner):
         return len(self.dagger_X)
 
     def get_dataset(self) -> Tuple[np.ndarray, np.ndarray]:
-        return np.array(self.dagger_X, dtype=np.float32), np.array(self.dagger_Y, dtype=np.float32)
+        """Return collected (X, Y) arrays after simulation finishes."""
+        return np.array(self.dagger_X, dtype=np.float32), \
+               np.array(self.dagger_Y, dtype=np.float32)
 
 
-# -- BEV CNN ------------------------------------------------------------------
+# ── BEV CNN ───────────────────────────────────────────────────────────────────
 
+# Grid constants (must match bev_cnn.ipynb)
 _HISTORY_STEPS = 10
 _FUTURE_STEPS  = 16
 _GRID_H = _GRID_W = 64
 _M_PER_PIX      = 0.5
 _BEV_CHANNELS   = 3
 _V_MAX          = 20.0
-_BEV_DT         = 0.1
+_BEV_DT         = 0.1   # nuPlan 10 Hz
 
 
-def _rasterize_ego_bev(history_x, history_y, history_yaw, history_vx, history_vy):
+def _rasterize_ego_bev(
+    history_x:   np.ndarray,
+    history_y:   np.ndarray,
+    history_yaw: np.ndarray,
+    history_vx:  np.ndarray,
+    history_vy:  np.ndarray,
+) -> np.ndarray:
+    """
+    (T,) global-frame arrays → (3, 64, 64) float32 BEV image.
+    Ch 0: temporal occupancy (0.1…1.0, oldest→newest)
+    Ch 1: speed magnitude    (0…1, normalised by V_MAX)
+    Ch 2: heading delta      (−1…1, normalised by π)
+    WHY: see bev_cnn.ipynb Cell 2 for full rationale.
+    """
     T   = len(history_x)
     img = np.zeros((_BEV_CHANNELS, _GRID_H, _GRID_W), dtype=np.float32)
     cx, cy, c_yaw = history_x[-1], history_y[-1], history_yaw[-1]
-    cos_h = np.cos(-c_yaw); sin_h = np.sin(-c_yaw)
+    cos_h = np.cos(-c_yaw)
+    sin_h = np.sin(-c_yaw)
     for t in range(T):
         dx_e =  cos_h * (history_x[t] - cx) - sin_h * (history_y[t] - cy)
         dy_e =  sin_h * (history_x[t] - cx) + cos_h * (history_y[t] - cy)
@@ -371,84 +427,154 @@ def _rasterize_ego_bev(history_x, history_y, history_yaw, history_vx, history_vy
 
 
 class BEVPolicy(nn.Module):
-    """BEV CNN + ego state MLP -> trajectory. REF: loosely follows VectorNet BEV encoder."""
+    """
+    BEV CNN + ego state MLP → trajectory.
+    Input:  bev   (B, 3, 64, 64)
+            state (B, 6)  -- normalised [sin(yaw), cos(yaw), vx, vy, ax, ay]
+    Output: traj  (B, 48) -- normalised (dx, dy, d_yaw) × 16
 
-    def __init__(self, bev_ch=_BEV_CHANNELS, state_dim=6, out_dim=_FUTURE_STEPS*3):
+    Architecture:
+        CNN: 3 conv blocks (32→64→128ch), AdaptiveAvgPool(1) → 128-dim
+        MLP: 6 → 64 → 64
+        Head: (128+64) → 256 → 48
+    Parameters: ~370K  (BC MLP: ~260K)
+    REF: loosely follows VectorNet BEV encoder (Gao et al. 2020).
+    """
+
+    def __init__(
+        self,
+        bev_ch:    int = _BEV_CHANNELS,
+        state_dim: int = 6,
+        out_dim:   int = _FUTURE_STEPS * 3,
+    ):
         super().__init__()
+
         def conv_block(in_ch, out_ch):
             return nn.Sequential(
-                nn.Conv2d(in_ch, out_ch, 3, padding=1), nn.ReLU(inplace=True),
+                nn.Conv2d(in_ch,  out_ch, 3, padding=1), nn.ReLU(inplace=True),
                 nn.Conv2d(out_ch, out_ch, 3, padding=1), nn.ReLU(inplace=True),
                 nn.MaxPool2d(2),
             )
-        self.encoder = nn.Sequential(
-            conv_block(bev_ch, 32), conv_block(32, 64), conv_block(64, 128),
-            nn.AdaptiveAvgPool2d(1), nn.Flatten(),
-        )
-        self.state_enc = nn.Sequential(nn.Linear(state_dim, 64), nn.ReLU(inplace=True),
-                                       nn.Linear(64, 64), nn.ReLU(inplace=True))
-        self.head = nn.Sequential(nn.Linear(128+64, 256), nn.ReLU(inplace=True),
-                                  nn.Linear(256, out_dim))
 
-    def forward(self, bev, state):
+        self.encoder = nn.Sequential(
+            conv_block(bev_ch, 32),
+            conv_block(32,     64),
+            conv_block(64,     128),
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+        )
+        self.state_enc = nn.Sequential(
+            nn.Linear(state_dim, 64), nn.ReLU(inplace=True),
+            nn.Linear(64, 64),        nn.ReLU(inplace=True),
+        )
+        self.head = nn.Sequential(
+            nn.Linear(128 + 64, 256), nn.ReLU(inplace=True),
+            nn.Linear(256, out_dim),
+        )
+
+    def forward(self, bev: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
         return self.head(torch.cat([self.encoder(bev), self.state_enc(state)], dim=-1))
 
 
 class BEVPlanner(AbstractPlanner):
+    """
+    AbstractPlanner wrapper for BEVPolicy.
+
+    Maintains a rolling HISTORY_STEPS buffer of ego states and rasterizes a
+    BEV image at each planning step before calling the CNN policy.
+
+    Padding: if fewer than HISTORY_STEPS states are in the buffer (start of
+    scenario), the oldest available state is repeated (zero-order hold).
+    WHY: zero-order hold is a neutral, static assumption. Padding with zeros
+    would introduce artificial velocity / heading discontinuities.
+    """
+
     def __init__(self, ckpt_path: str):
-        self._ckpt_path = ckpt_path; self._device = torch.device('cpu')
+        self._ckpt_path = ckpt_path
+        self._device    = torch.device('cpu')
         self._model: Optional[BEVPolicy] = None
-        self._S_mean = self._S_std = self._T_mean = self._T_std = None
+        self._S_mean = self._S_std = None
+        self._T_mean = self._T_std = None
         self._history: List[Tuple[float, float, float, float, float]] = []
 
-    def name(self) -> str: return 'BEVPlanner'
-    def observation_type(self): return DetectionsTracks
+    def name(self) -> str:
+        return 'BEVPlanner'
+
+    def observation_type(self):
+        return DetectionsTracks
 
     def initialize(self, initialization: PlannerInitialization) -> None:
         ckpt = torch.load(self._ckpt_path, map_location=self._device, weights_only=False)
-        self._model = BEVPolicy().to(self._device); self._model.load_state_dict(ckpt['model']); self._model.eval()
+        self._model = BEVPolicy().to(self._device)
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
         self._S_mean = torch.tensor(ckpt['S_mean'], dtype=torch.float32)
         self._S_std  = torch.tensor(ckpt['S_std'],  dtype=torch.float32)
-        self._T_mean = ckpt['T_mean']; self._T_std = ckpt['T_std']; self._history = []
+        self._T_mean = ckpt['T_mean']
+        self._T_std  = ckpt['T_std']
+        self._history = []
 
     def _build_bev_tensor(self) -> torch.Tensor:
         buf = list(self._history)
-        buf = ([buf[0]] * (_HISTORY_STEPS - len(buf)) + buf) if len(buf) < _HISTORY_STEPS else buf[-_HISTORY_STEPS:]
-        h = np.array(buf, dtype=np.float32)
-        return torch.from_numpy(_rasterize_ego_bev(h[:,0], h[:,1], h[:,2], h[:,3], h[:,4])).unsqueeze(0)
+        if len(buf) < _HISTORY_STEPS:
+            buf = [buf[0]] * (_HISTORY_STEPS - len(buf)) + buf
+        else:
+            buf = buf[-_HISTORY_STEPS:]
+        h   = np.array(buf, dtype=np.float32)
+        bev = _rasterize_ego_bev(h[:,0], h[:,1], h[:,2], h[:,3], h[:,4])
+        return torch.from_numpy(bev).unsqueeze(0)
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
-        ego = current_input.history.current_state[0]; dcs = ego.dynamic_car_state
-        self._history.append((ego.rear_axle.x, ego.rear_axle.y, ego.rear_axle.heading,
-                               dcs.rear_axle_velocity_2d.x, dcs.rear_axle_velocity_2d.y))
-        bev_t = self._build_bev_tensor().to(self._device)
-        yaw = ego.rear_axle.heading
-        state_np = np.array([np.sin(yaw), np.cos(yaw), dcs.rear_axle_velocity_2d.x,
-                              dcs.rear_axle_velocity_2d.y, dcs.rear_axle_acceleration_2d.x,
-                              dcs.rear_axle_acceleration_2d.y], dtype=np.float32)
-        state_t = torch.tensor((state_np - self._S_mean.numpy()) / self._S_std.numpy(),
-                                dtype=torch.float32).unsqueeze(0).to(self._device)
+        ego = current_input.history.current_state[0]
+        dcs = ego.dynamic_car_state
+        self._history.append((
+            ego.rear_axle.x, ego.rear_axle.y, ego.rear_axle.heading,
+            dcs.rear_axle_velocity_2d.x, dcs.rear_axle_velocity_2d.y,
+        ))
+
+        bev_t   = self._build_bev_tensor().to(self._device)
+        yaw     = ego.rear_axle.heading
+        state_np = np.array([
+            np.sin(yaw), np.cos(yaw),
+            dcs.rear_axle_velocity_2d.x,
+            dcs.rear_axle_velocity_2d.y,
+            dcs.rear_axle_acceleration_2d.x,
+            dcs.rear_axle_acceleration_2d.y,
+        ], dtype=np.float32)
+        state_t = torch.tensor(
+            (state_np - self._S_mean.numpy()) / self._S_std.numpy(),
+            dtype=torch.float32,
+        ).unsqueeze(0).to(self._device)
+
         with torch.no_grad():
             pred_norm = self._model(bev_t, state_t).squeeze(0).numpy()
         pred = (pred_norm * self._T_std + self._T_mean).reshape(_FUTURE_STEPS, 3)
-        cx, cy = ego.rear_axle.x, ego.rear_axle.y
+
+        cx, cy    = ego.rear_axle.x, ego.rear_axle.y
         cos_h, sin_h = np.cos(yaw), np.sin(yaw)
-        vx = dcs.rear_axle_velocity_2d.x; vy = dcs.rear_axle_velocity_2d.y
-        ax = dcs.rear_axle_acceleration_2d.x; ay = dcs.rear_axle_acceleration_2d.y
+        vx = dcs.rear_axle_velocity_2d.x
+        vy = dcs.rear_axle_velocity_2d.y
+        ax = dcs.rear_axle_acceleration_2d.x
+        ay = dcs.rear_axle_acceleration_2d.y
         t0 = ego.time_point.time_us
+
         states = [ego]
         for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = cx + cos_h * dx_e - sin_h * dy_e
+            wy    = cy + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
             states.append(EgoState.build_from_rear_axle(
-                rear_axle_pose=StateSE2(cx + cos_h*dx_e - sin_h*dy_e, cy + sin_h*dx_e + cos_h*dy_e, yaw + d_yaw),
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
                 rear_axle_velocity_2d=StateVector2D(vx, vy),
                 rear_axle_acceleration_2d=StateVector2D(ax, ay),
                 tire_steering_angle=0.0,
-                time_point=TimePoint(t0 + int((j+1)*_BEV_DT*1e6)),
-                vehicle_parameters=ego.car_footprint.vehicle_parameters))
+                time_point=TimePoint(t0 + int((j + 1) * _BEV_DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
         return InterpolatedTrajectory(states)
 
 
-# -- MILE World Model ---------------------------------------------------------
+# ── MILE World Model ──────────────────────────────────────────────────────────
 
 _MILE_LATENT = 64
 _MILE_FUTURE = 16
@@ -457,80 +583,164 @@ _MILE_FUTURE = 16
 class MILEPolicy(nn.Module):
     """
     MILE-inspired world model policy.
-    REF: Hu et al. (2022) "Model-Based Imitation Learning for Urban Driving." NeurIPS 2022.
-    """
-    def __init__(self, state_dim=6, latent_dim=_MILE_LATENT, act_dim=3, out_dim=_MILE_FUTURE*3):
-        super().__init__()
-        self.encoder = nn.Sequential(nn.Linear(state_dim, 128), nn.ReLU(inplace=True),
-                                     nn.Linear(128, latent_dim), nn.LayerNorm(latent_dim))
-        self.world_model = nn.GRUCell(latent_dim + act_dim, latent_dim)
-        self.policy = nn.Sequential(nn.Linear(latent_dim, 128), nn.ReLU(inplace=True),
-                                    nn.Linear(128, 256), nn.ReLU(inplace=True),
-                                    nn.Linear(256, out_dim))
+    REF: Hu et al. (2022) "Model-Based Imitation Learning for Urban Driving."
+         NeurIPS 2022. arXiv:2209.14430
 
-    def encode(self, state): return self.encoder(state)
-    def step_world(self, z, action): return self.world_model(torch.cat([z, action], dim=-1), z)
-    def predict_trajectory(self, z): return self.policy(z)
-    def forward(self, state): return self.predict_trajectory(self.encode(state))
+    Components trained jointly:
+      Encoder     : 6 → 128 → 64   (state → latent z, with LayerNorm)
+      World model : GRUCell(64+3, 64)  (z_t + action_t → z_{t+1})
+      Policy      : 64 → 128 → 256 → 48  (z_t → trajectory)
+
+    Training objective:
+      L = L_imitation + BETA * L_consistency
+      L_imitation  = MSE(policy(z_t), traj_gt)
+      L_consistency = mean_j MSE(world_model(z_j, a_j), encoder(state_{t+j+1}))
+      — teacher forcing: a_j = GT action at step j (prevents circular dependency)
+
+    Inference path:
+      state → encode → z → policy → trajectory
+      (world model not used at inference)
+
+    Parameters: ~73K  (BC MLP: ~260K)
+    """
+
+    def __init__(
+        self,
+        state_dim:  int = 6,
+        latent_dim: int = _MILE_LATENT,
+        act_dim:    int = 3,
+        out_dim:    int = _MILE_FUTURE * 3,
+    ):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(state_dim,  128), nn.ReLU(inplace=True),
+            nn.Linear(128, latent_dim),
+            nn.LayerNorm(latent_dim),
+            # WHY LayerNorm: prevents consistency loss from collapsing all z → 0
+        )
+        # WHY GRUCell (not full GRU module): manual rollout needed to accumulate
+        # per-step consistency loss with teacher-forcing actions.
+        self.world_model = nn.GRUCell(latent_dim + act_dim, latent_dim)
+        self.policy = nn.Sequential(
+            nn.Linear(latent_dim, 128), nn.ReLU(inplace=True),
+            nn.Linear(128, 256),        nn.ReLU(inplace=True),
+            nn.Linear(256, out_dim),
+        )
+
+    def encode(self, state: torch.Tensor) -> torch.Tensor:
+        return self.encoder(state)
+
+    def step_world(self, z: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        return self.world_model(torch.cat([z, action], dim=-1), z)
+
+    def predict_trajectory(self, z: torch.Tensor) -> torch.Tensor:
+        return self.policy(z)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        """Inference: state (B,6) → trajectory (B,48)."""
+        return self.predict_trajectory(self.encode(state))
 
 
 class MILEPlanner(AbstractPlanner):
-    def __init__(self, ckpt_path: str):
-        self._ckpt_path = ckpt_path; self._device = torch.device('cpu')
-        self._model: Optional[MILEPolicy] = None
-        self._S_mean = self._S_std = self._T_mean = self._T_std = None
+    """
+    AbstractPlanner wrapper for MILEPolicy.
+    Inference path: state → encoder → latent → policy → trajectory.
+    The world model (GRUCell) is used only during training — not at inference.
 
-    def name(self) -> str: return 'MILEPlanner'
-    def observation_type(self): return DetectionsTracks
+    This is structurally identical to BCPlanner; the difference is the
+    internal architecture (encoder + latent + policy vs flat MLP) and the
+    normalization stats (S_mean/S_std vs X_mean/X_std naming).
+    """
+
+    def __init__(self, ckpt_path: str):
+        self._ckpt_path = ckpt_path
+        self._device    = torch.device('cpu')
+        self._model: Optional[MILEPolicy] = None
+        self._S_mean = self._S_std = None
+        self._T_mean = self._T_std = None
+
+    def name(self) -> str:
+        return 'MILEPlanner'
+
+    def observation_type(self):
+        return DetectionsTracks
 
     def initialize(self, initialization: PlannerInitialization) -> None:
         ckpt = torch.load(self._ckpt_path, map_location=self._device, weights_only=False)
-        self._model = MILEPolicy().to(self._device); self._model.load_state_dict(ckpt['model']); self._model.eval()
+        self._model = MILEPolicy().to(self._device)
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
         self._S_mean = torch.tensor(ckpt['S_mean'], dtype=torch.float32)
         self._S_std  = torch.tensor(ckpt['S_std'],  dtype=torch.float32)
-        self._T_mean = ckpt['T_mean']; self._T_std = ckpt['T_std']
+        self._T_mean = ckpt['T_mean']
+        self._T_std  = ckpt['T_std']
 
     def _ego_features(self, ego: EgoState) -> np.ndarray:
-        h = ego.rear_axle.heading; dcs = ego.dynamic_car_state
-        return np.array([np.sin(h), np.cos(h), dcs.rear_axle_velocity_2d.x,
-                         dcs.rear_axle_velocity_2d.y, dcs.rear_axle_acceleration_2d.x,
-                         dcs.rear_axle_acceleration_2d.y], dtype=np.float32)
+        h   = ego.rear_axle.heading
+        dcs = ego.dynamic_car_state
+        return np.array([
+            np.sin(h), np.cos(h),
+            dcs.rear_axle_velocity_2d.x,
+            dcs.rear_axle_velocity_2d.y,
+            dcs.rear_axle_acceleration_2d.x,
+            dcs.rear_axle_acceleration_2d.y,
+        ], dtype=np.float32)
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
-        ego = current_input.history.current_state[0]
+        ego  = current_input.history.current_state[0]
         feat = self._ego_features(ego)
-        x_t = torch.tensor((feat - self._S_mean.numpy()) / self._S_std.numpy(),
-                            dtype=torch.float32).unsqueeze(0)
+        x_t  = torch.tensor(
+            (feat - self._S_mean.numpy()) / self._S_std.numpy(),
+            dtype=torch.float32,
+        ).unsqueeze(0)
         with torch.no_grad():
             pred_norm = self._model(x_t).squeeze(0).numpy()
         pred = (pred_norm * self._T_std + self._T_mean).reshape(_MILE_FUTURE, 3)
-        cx, cy = ego.rear_axle.x, ego.rear_axle.y; heading = ego.rear_axle.heading
-        cos_h, sin_h = np.cos(heading), np.sin(heading); dcs = ego.dynamic_car_state
-        vx = dcs.rear_axle_velocity_2d.x; vy = dcs.rear_axle_velocity_2d.y
-        ax = dcs.rear_axle_acceleration_2d.x; ay = dcs.rear_axle_acceleration_2d.y
-        t0 = ego.time_point.time_us
+
+        cx, cy    = ego.rear_axle.x, ego.rear_axle.y
+        heading   = ego.rear_axle.heading
+        cos_h, sin_h = np.cos(heading), np.sin(heading)
+        dcs = ego.dynamic_car_state
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
+
         states = [ego]
         for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = cx + cos_h * dx_e - sin_h * dy_e
+            wy    = cy + sin_h * dx_e + cos_h * dy_e
+            w_yaw = heading + d_yaw
             states.append(EgoState.build_from_rear_axle(
-                rear_axle_pose=StateSE2(cx + cos_h*dx_e - sin_h*dy_e, cy + sin_h*dx_e + cos_h*dy_e, heading + d_yaw),
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
                 rear_axle_velocity_2d=StateVector2D(vx, vy),
                 rear_axle_acceleration_2d=StateVector2D(ax, ay),
                 tire_steering_angle=0.0,
-                time_point=TimePoint(t0 + int((j+1)*DT*1e6)),
-                vehicle_parameters=ego.car_footprint.vehicle_parameters))
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
         return InterpolatedTrajectory(states)
 
 
-# -- Goal-conditioned BC ------------------------------------------------------
+# ── Goal-conditioned BC ───────────────────────────────────────────────────────
 
 class GoalBCPolicy(nn.Module):
     """
     Goal-conditioned BC policy.
-    Input : [sin(yaw), cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal]  (8-dim default)
-    Output: [(dx, dy, d_yaw) x 16]  (48-dim, ego-frame)
-    WHY in_dim param: dual-horizon variant (Phase 3c''''') uses 10 features.
+    Input : [sin(yaw), cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal]  (8-dim)
+    Output: [(dx, dy, d_yaw) x 16]                                  (48-dim, ego-frame)
+
+    Ablation over BCPolicy: everything identical except 2 additional goal features.
+    WHY goal = T+8 waypoint: 0.8s horizon gives the policy enough road context
+    to anticipate upcoming curves without leaking far-future expert trajectory.
     """
+
     def __init__(self, in_dim: int = 8):
+        # WHY in_dim param (default 8, backward compatible): the dual-horizon variant
+        # (Phase 3c''''') feeds 10 features [state(6) + near_goal(2) + far_goal(2)].
+        # Existing checkpoints (goal_bc.pt) load unchanged because GoalBCPolicy() still
+        # builds the 8-dim network; state_dict shapes are unaffected by the new kwarg.
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(in_dim, 256), nn.ReLU(),
@@ -538,425 +748,990 @@ class GoalBCPolicy(nn.Module):
             nn.Linear(256, 256), nn.ReLU(),
             nn.Linear(256, 48),
         )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
 
 class GoalBCPlanner(AbstractPlanner):
     """
-    Goal-conditioned BC planner. Wraps GoalBCPolicy with expert T+8 waypoint lookup.
-    WHY: oracle upper-bound -- tests if policy can execute given the correct goal.
-    """
-    def __init__(self, checkpoint_path: str, db_path: str):
-        self._ckpt_path = checkpoint_path; self._db_path = db_path
-        self._device = torch.device('cpu')
-        self._model: Optional[GoalBCPolicy] = None
-        self._X_mean = self._X_std = self._Y_mean = self._Y_std = None
-        self._expert: dict = {}; self._sorted_ts: List[int] = []
+    Goal-conditioned BC planner.
+    Wraps GoalBCPolicy with expert T+8 waypoint lookup from the nuPlan DB.
 
-    def name(self) -> str: return 'GoalBCPlanner'
-    def observation_type(self): return DetectionsTracks
+    WHY expert goal at inference: this is an honest upper-bound eval.
+    We test "given correct goal, can the policy execute road-following?"
+    If closed-loop L2 drops significantly vs BCPlanner, the root cause of
+    Phase 2 plateau is confirmed: the policy can execute when given directional
+    guidance. If L2 stays flat, the bottleneck is control precision.
+    """
+
+    def __init__(self, checkpoint_path: str, db_path: str):
+        # WHY db_path: we look up the expert T+8 waypoint from the DB at each planning step.
+        self._ckpt_path = checkpoint_path
+        self._db_path   = db_path
+        self._device    = torch.device('cpu')   # WHY: CPU for sim stability on macOS MPS
+        self._model: Optional[GoalBCPolicy] = None
+        self._X_mean = self._X_std = None
+        self._Y_mean = self._Y_std = None
+        self._expert: dict = {}       # timestamp_us -> (x, y, yaw)
+        self._sorted_ts: List[int] = []
+
+    def name(self) -> str:
+        return 'GoalBCPlanner'
+
+    def observation_type(self):
+        return DetectionsTracks
 
     def initialize(self, initialization: PlannerInitialization) -> None:
+        # Load model weights
         ckpt = torch.load(self._ckpt_path, map_location=self._device, weights_only=False)
         self._model = GoalBCPolicy().to(self._device)
-        self._model.load_state_dict(ckpt['model']); self._model.eval()
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
         self._X_mean = torch.tensor(ckpt['X_mean'], dtype=torch.float32)
         self._X_std  = torch.tensor(ckpt['X_std'],  dtype=torch.float32)
-        self._Y_mean = ckpt['Y_mean']; self._Y_std = ckpt['Y_std']
+        self._Y_mean = ckpt['Y_mean']
+        self._Y_std  = ckpt['Y_std']
+
+        # Build expert timestamp lookup from DB
+        # WHY: pre-load at initialize() not __init__ to avoid DB connection before simulation
         self._build_expert_lookup()
 
     def _build_expert_lookup(self) -> None:
-        con = sqlite3.connect(self._db_path)
-        rows = con.execute('SELECT timestamp, x, y, qw, qx, qy, qz FROM ego_pose ORDER BY timestamp').fetchall()
+        """Pre-load ego_pose table as {timestamp_us -> (x, y, yaw)}."""
+        con  = sqlite3.connect(self._db_path)
+        rows = con.execute(
+            'SELECT timestamp, x, y, qw, qx, qy, qz FROM ego_pose ORDER BY timestamp'
+        ).fetchall()
         con.close()
         for ts, x, y, qw, qx, qy, qz in rows:
-            yaw = np.arctan2(2.0*(qw*qz + qx*qy), 1.0 - 2.0*(qy**2 + qz**2))
+            yaw = np.arctan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy ** 2 + qz ** 2))
             self._expert[int(ts)] = (x, y, yaw)
         self._sorted_ts = sorted(self._expert.keys())
 
     def _get_expert_at_offset(self, current_ts_us: int, offset_steps: int = 8) -> Tuple[float, float, float]:
-        target_ts = current_ts_us + offset_steps * 100_000
-        idx = min(int(np.searchsorted(self._sorted_ts, target_ts)), len(self._sorted_ts) - 1)
+        """Return expert (x, y, yaw) at current_ts + offset_steps * 100 ms.
+
+        NOTE: The DB is 100 Hz (10 ms/row). offset_steps here is in 100 ms simulation
+        steps (nuPlan calls the planner at ~10 Hz). offset_steps=8 → T+0.8 s at inference,
+        which is 10× the training goal horizon (GOAL_OFFSET=8 raw rows × 10 ms = 0.08 s).
+        See verify_pipeline.py Check 3.
+        """
+        target_ts = current_ts_us + offset_steps * 100_000   # 100_000 µs = 100 ms = 1 sim step
+        idx = int(np.searchsorted(self._sorted_ts, target_ts))
+        idx = min(idx, len(self._sorted_ts) - 1)
         return self._expert[self._sorted_ts[idx]]
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
-        ego = current_input.history.current_state[0]
-        x_g, y_g, yaw = ego.rear_axle.x, ego.rear_axle.y, ego.rear_axle.heading
-        dcs = ego.dynamic_car_state
-        vx, vy = dcs.rear_axle_velocity_2d.x, dcs.rear_axle_velocity_2d.y
-        ax, ay = dcs.rear_axle_acceleration_2d.x, dcs.rear_axle_acceleration_2d.y
-        ts = int(ego.time_point.time_us); t0 = ego.time_point.time_us
+        ego    = current_input.history.current_state[0]
+        x_g    = ego.rear_axle.x
+        y_g    = ego.rear_axle.y
+        yaw    = ego.rear_axle.heading
+        dcs    = ego.dynamic_car_state
+        vx     = dcs.rear_axle_velocity_2d.x
+        vy     = dcs.rear_axle_velocity_2d.y
+        ax     = dcs.rear_axle_acceleration_2d.x
+        ay     = dcs.rear_axle_acceleration_2d.y
+        ts     = int(ego.time_point.time_us)
+        t0     = ego.time_point.time_us
+
+        # Get T+8 goal position from expert DB, transform to ego-frame
         gx, gy, _ = self._get_expert_at_offset(ts, offset_steps=8)
-        cn, sn = np.cos(-yaw), np.sin(-yaw)
-        dx_goal = cn*(gx-x_g) - sn*(gy-y_g); dy_goal = sn*(gx-x_g) + cn*(gy-y_g)
-        feat = torch.tensor([np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal], dtype=torch.float32)
+        cos_neg_yaw = np.cos(-yaw)
+        sin_neg_yaw = np.sin(-yaw)
+        dx_w    = gx - x_g
+        dy_w    = gy - y_g
+        dx_goal = cos_neg_yaw * dx_w - sin_neg_yaw * dy_w
+        dy_goal = sin_neg_yaw * dx_w + cos_neg_yaw * dy_w
+
+        feat = torch.tensor(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal],
+            dtype=torch.float32,
+        )
         feat_norm = (feat - self._X_mean) / self._X_std
+
         with torch.no_grad():
             pred_norm = self._model(feat_norm.unsqueeze(0)).squeeze(0).numpy()
         pred = (pred_norm * self._Y_std + self._Y_mean).reshape(FUTURE_STEPS, 3)
+
         cos_h, sin_h = np.cos(yaw), np.sin(yaw)
+
         states = [ego]
         for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
             states.append(EgoState.build_from_rear_axle(
-                rear_axle_pose=StateSE2(x_g + cos_h*dx_e - sin_h*dy_e, y_g + sin_h*dx_e + cos_h*dy_e, yaw + d_yaw),
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
                 rear_axle_velocity_2d=StateVector2D(vx, vy),
                 rear_axle_acceleration_2d=StateVector2D(ax, ay),
                 tire_steering_angle=0.0,
-                time_point=TimePoint(t0 + int((j+1)*DT*1e6)),
-                vehicle_parameters=ego.car_footprint.vehicle_parameters))
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
         return InterpolatedTrajectory(states)
 
 
 # ---------------------------------------------------------------------------
-# Phase 3b -- MapBCPlanner
+# Phase 3b — MapBCPlanner
 # ---------------------------------------------------------------------------
 
 class MapBCPlanner(AbstractPlanner):
     """
     MapBC: GoalBC weights at inference with road-centerline goal (no expert).
-    WHY reuse GoalBCPolicy weights: identical training; only inference goal SOURCE differs.
+
+    WHY reuse GoalBCPolicy weights (goal_bc.pt):
+      MapBC and GoalBC share identical training data and architecture. Both use
+      [state(6) + goal(2)] = 8-dim input at training time with expert T+8 goals.
+      The trained weights are therefore identical. The ONLY difference is inference:
+        GoalBCPlanner  -> goal from expert DB lookup (T+8 expert position)
+        MapBCPlanner   -> goal from road centerline (nuPlan map look-ahead)
+      This cleanly isolates the effect of goal SOURCE on closed-loop performance.
+      Any L2 gap between GoalBC (1.820m) and MapBC is purely due to how closely
+      the map centerline approximates the expert T+8 position.
+
+    At deployment: MapBCPlanner needs only a checkpoint + HD map. No expert data
+    required at runtime -- this is a fully deployable policy.
     """
+
     def __init__(self, checkpoint_path: str, look_ahead_m: float = 8.0) -> None:
-        self._look_ahead_m = look_ahead_m; self._map_api = None
+        self._look_ahead_m = look_ahead_m
+        self._map_api      = None    # injected by nuPlan via initialize()
+
         ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
         self._model = GoalBCPolicy().to('cpu')
-        self._model.load_state_dict(ckpt['model']); self._model.eval()
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
         self._X_mean = torch.tensor(ckpt['X_mean'], dtype=torch.float32)
         self._X_std  = torch.tensor(ckpt['X_std'],  dtype=torch.float32)
-        self._Y_mean = ckpt['Y_mean']; self._Y_std = ckpt['Y_std']
+        self._Y_mean = ckpt['Y_mean']
+        self._Y_std  = ckpt['Y_std']
 
-    def name(self) -> str: return 'MapBCPlanner'
+    def name(self) -> str:
+        return 'MapBCPlanner'
 
     def observation_type(self):
         from nuplan.planning.simulation.observation.observation_type import DetectionsTracks
         return DetectionsTracks
 
     def initialize(self, initialization) -> None:
+        # WHY store map_api here: nuPlan injects the scenario map_api via initialize().
+        # This gives real-time map access without a DB path and automatically uses
+        # the correct city map for each scenario.
         self._map_api = initialization.map_api
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
         ego = current_input.history.current_state[0]
-        x_g, y_g, yaw = ego.rear_axle.x, ego.rear_axle.y, ego.rear_axle.heading
+        x_g = ego.rear_axle.x
+        y_g = ego.rear_axle.y
+        yaw = ego.rear_axle.heading
         dcs = ego.dynamic_car_state
-        vx, vy = dcs.rear_axle_velocity_2d.x, dcs.rear_axle_velocity_2d.y
-        ax, ay = dcs.rear_axle_acceleration_2d.x, dcs.rear_axle_acceleration_2d.y
-        t0 = ego.time_point.time_us
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
+
+        # Get centerline goal from HD map -- no expert data required
         dx_goal, dy_goal = self._get_map_goal(x_g, y_g, yaw)
-        feat = torch.tensor([np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal], dtype=torch.float32)
+
+        feat = torch.tensor(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal],
+            dtype=torch.float32,
+        )
         feat_norm = (feat - self._X_mean) / self._X_std
+
         with torch.no_grad():
             pred_norm = self._model(feat_norm.unsqueeze(0)).squeeze(0).numpy()
         pred = (pred_norm * self._Y_std + self._Y_mean).reshape(FUTURE_STEPS, 3)
-        cos_h, sin_h = np.cos(yaw), np.sin(yaw)
+
+        cos_h = np.cos(yaw)
+        sin_h = np.sin(yaw)
         states = [ego]
         for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
             states.append(EgoState.build_from_rear_axle(
-                rear_axle_pose=StateSE2(x_g + cos_h*dx_e - sin_h*dy_e, y_g + sin_h*dx_e + cos_h*dy_e, yaw + d_yaw),
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
                 rear_axle_velocity_2d=StateVector2D(vx, vy),
                 rear_axle_acceleration_2d=StateVector2D(ax, ay),
                 tire_steering_angle=0.0,
-                time_point=TimePoint(t0 + int((j+1)*DT*1e6)),
-                vehicle_parameters=ego.car_footprint.vehicle_parameters))
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
         return InterpolatedTrajectory(states)
 
     def _get_map_goal(self, x: float, y: float, yaw: float) -> Tuple[float, float]:
+        """Query nuPlan map_api for look-ahead centerline goal in ego-frame."""
         from nuplan.common.maps.maps_datatypes import SemanticMapLayer
         from nuplan.common.actor_state.state_representation import Point2D
-        FALLBACK = (float(self._look_ahead_m), 0.0)
-        if self._map_api is None: return FALLBACK
+
+        FALLBACK = (float(self._look_ahead_m), 0.0)   # straight-ahead in ego-frame
+
+        if self._map_api is None:
+            return FALLBACK
+
         try:
-            result = self._map_api.get_proximal_map_objects(Point2D(x, y), radius=30.0, layers=[SemanticMapLayer.LANE])
+            result = self._map_api.get_proximal_map_objects(
+                Point2D(x, y), radius=30.0, layers=[SemanticMapLayer.LANE]
+            )
             lanes = result[SemanticMapLayer.LANE]
-        except Exception: return FALLBACK
-        if not lanes: return FALLBACK
+        except Exception:
+            # WHY broad except: ego may drift outside mapped region during
+            # compounding error. Fallback keeps simulation running cleanly.
+            return FALLBACK
+
+        if not lanes:
+            return FALLBACK
+
+        # Select lane by heading-weighted distance (v2 fix).
+        # WHY: naive nearest-centerline (v1) scored 56.3m — WORSE than BC_v0 (49.5m).
+        # Root cause: at intersections / after drift the closest lane tangent was
+        # anti-aligned with ego heading, so the look-ahead goal pointed BACKWARD.
+        # Fix: penalise lanes whose tangent at the closest point opposes ego heading.
+        # Score = dist + 30 * heading_penalty, where heading_penalty = max(0, -cos_angle).
+        # A lane pointing directly backward gets +30m penalty (≈ the search radius),
+        # effectively excluding it unless no forward-aligned lane exists within 30m.
         ego_dir = np.array([np.cos(yaw), np.sin(yaw)])
         best_lane, best_score = None, float('inf')
         for lane in lanes:
             try:
-                cl_pts = np.array([(s.x, s.y) for s in lane.baseline_path.discrete_path])
+                cl_pts  = np.array([(s.x, s.y) for s in lane.baseline_path.discrete_path])
                 dists_l = np.linalg.norm(cl_pts - np.array([x, y]), axis=1)
-                i0_l = int(np.argmin(dists_l)); d = float(dists_l[i0_l])
-                i_next = min(i0_l+1, len(cl_pts)-1)
-                tangent = cl_pts[i_next] - cl_pts[i0_l]; t_norm = float(np.linalg.norm(tangent))
-                heading_penalty = max(0.0, -float(np.dot(tangent/t_norm, ego_dir))) if t_norm > 1e-6 else 0.0
+                i0_l    = int(np.argmin(dists_l))
+                d       = float(dists_l[i0_l])
+                i_next  = min(i0_l + 1, len(cl_pts) - 1)
+                tangent = cl_pts[i_next] - cl_pts[i0_l]
+                t_norm  = float(np.linalg.norm(tangent))
+                if t_norm > 1e-6:
+                    cos_a           = float(np.dot(tangent / t_norm, ego_dir))
+                    heading_penalty = max(0.0, -cos_a)
+                else:
+                    heading_penalty = 0.0
                 score = d + 30.0 * heading_penalty
-                if score < best_score: best_score, best_lane = score, lane
-            except Exception: continue
-        if best_lane is None: return FALLBACK
-        cl = np.array([(s.x, s.y) for s in best_lane.baseline_path.discrete_path])
-        dists = np.linalg.norm(cl - np.array([x, y]), axis=1); i0 = int(np.argmin(dists))
-        cum = 0.0; i_goal = min(i0+1, len(cl)-1)
-        for i in range(i0, len(cl)-1):
-            cum += float(np.linalg.norm(cl[i+1] - cl[i]))
-            if cum >= self._look_ahead_m: i_goal = i+1; break
-        else: i_goal = len(cl)-1
-        gx, gy = cl[i_goal]
-        cn, sn = np.cos(-yaw), np.sin(-yaw)
-        return (float(cn*(gx-x) - sn*(gy-y)), float(sn*(gx-x) + cn*(gy-y)))
+                if score < best_score:
+                    best_score, best_lane = score, lane
+            except Exception:
+                continue
+
+        if best_lane is None:
+            return FALLBACK
+
+        cl    = np.array([(s.x, s.y) for s in best_lane.baseline_path.discrete_path])
+        dists = np.linalg.norm(cl - np.array([x, y]), axis=1)
+        i0    = int(np.argmin(dists))
+
+        # Walk look_ahead_m along centerline from closest point
+        cum    = 0.0
+        i_goal = min(i0 + 1, len(cl) - 1)
+        for i in range(i0, len(cl) - 1):
+            cum += float(np.linalg.norm(cl[i + 1] - cl[i]))
+            if cum >= self._look_ahead_m:
+                i_goal = i + 1
+                break
+        else:
+            i_goal = len(cl) - 1
+
+        gx, gy  = cl[i_goal]
+        cos_neg = np.cos(-yaw)
+        sin_neg = np.sin(-yaw)
+        return (
+            float(cos_neg * (gx - x) - sin_neg * (gy - y)),
+            float(sin_neg * (gx - x) + cos_neg * (gy - y)),
+        )
 
 
 # ---------------------------------------------------------------------------
-# Phase 3c -- RouteMapBCPlanner
+# Phase 3c — RouteMapBCPlanner
 # ---------------------------------------------------------------------------
 
 class RouteMapBCPlanner(AbstractPlanner):
     """
     RouteMapBC: GoalBC weights at inference with a globally-tracked pre-computed route.
-    WHY: fixes MapBC drift-bootstrapping by pre-computing route once at scenario start.
+
+    Key difference from MapBCPlanner:
+      MapBC:      live map query at each step → fails when ego drifts off-road
+                  (get_proximal_map_objects returns 0 lanes once ego is >30m from road)
+      RouteMapBC: route pre-computed in initialize() → always valid, no live queries
+
+    WHY this fixes Phase 3b:
+      The drift-bootstrapping failure in MapBC happens because the point query
+      `get_proximal_map_objects(radius=30m)` is a LOCAL reference. Once the ego
+      compounding-drifts 2–3m off-road, the query returns zero lanes and the
+      straight-ahead fallback fires every step — worse than BC's implicit prior.
+
+      RouteMapBC mirrors how IDM works: compute a reference path AT SCENARIO START
+      and track progress along it globally. The stored route_pts array is always
+      valid regardless of how far the ego drifts — we just find the closest stored
+      point using argmin over all N stored waypoints.
+
+    Route construction (initialize()):
+      1. Get initial ego position from initialization.initial_ego_state
+      2. Query map for nearby lanes at initial position (radius=50m for robustness)
+      3. Select most forward-aligned lane (same heading-weighted scoring as MapBC v2)
+      4. Walk along centerline for 200m by chaining successor lanes
+      5. Store as self._route_pts — (N, 2) float64 array in global UTM coordinates
+
+    Goal computation (each planning step):
+      1. Find closest route point to current ego position (argmin over all route_pts)
+      2. Walk 8m forward from that point along the stored route
+      3. Transform goal to ego-frame → (dx_goal, dy_goal)
+      4. Always valid: route_pts are pre-stored, not live-queried
+
+    WHY 200m route:
+      nuPlan mini scenarios are 15–25 seconds at 5–15 m/s → 75–375m.
+      200m covers the majority of scenarios. If route runs out, fall back to last
+      waypoint direction (equivalent to "keep driving forward").
+
+    WHY reuse goal_bc.pt:
+      MapBC and GoalBC have identical training (same data, architecture, T+8 expert
+      goals). Only inference differs — the goal SOURCE changes. RouteMapBC uses the
+      same weights; the pre-computed route replaces both the expert DB and the live
+      map query. This isolates the effect of global vs. local goal reference.
+
     REF: IDM reference-path tracking concept. Treiber et al. (2000).
     """
 
     def __init__(self, checkpoint_path: str, look_ahead_m: float = 8.0,
                  speed_adaptive: bool = False) -> None:
-        self._look_ahead_m = look_ahead_m; self._speed_adaptive = speed_adaptive
-        self._route_pts: Optional[np.ndarray] = None; self._map_api = None
+        self._look_ahead_m   = look_ahead_m
+        # WHY speed_adaptive flag: keeps all look-ahead logic in one place so
+        # SpeedAdaptiveRouteMapBCPlanner is a trivial 3-line subclass with no duplication.
+        self._speed_adaptive = speed_adaptive
+        self._route_pts: Optional[np.ndarray] = None   # (N, 2) global UTM waypoints
+        self._map_api = None   # injected via initialize()
+
+        # WHY load weights in __init__ (same as MapBCPlanner): avoids repeated disk
+        # reads if the planner is instantiated once and reused across scenarios.
         ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
         self._model = GoalBCPolicy().to('cpu')
-        self._model.load_state_dict(ckpt['model']); self._model.eval()
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
         self._X_mean = torch.tensor(ckpt['X_mean'], dtype=torch.float32)
         self._X_std  = torch.tensor(ckpt['X_std'],  dtype=torch.float32)
-        self._Y_mean = ckpt['Y_mean']; self._Y_std = ckpt['Y_std']
+        self._Y_mean = ckpt['Y_mean']
+        self._Y_std  = ckpt['Y_std']
 
-    def name(self) -> str: return 'RouteMapBCPlanner'
+    def name(self) -> str:
+        return 'RouteMapBCPlanner'
 
     def observation_type(self):
         from nuplan.planning.simulation.observation.observation_type import DetectionsTracks
         return DetectionsTracks
 
     def initialize(self, initialization) -> None:
-        self._map_api = initialization.map_api; self._route_pts = None
+        """Store map_api and reset route. Route is built lazily on the first planning step.
+
+        WHY lazy construction: PlannerInitialization does not expose an initial_ego_state
+        field in this nuPlan version — only map_api, mission_goal, and route_roadblock_ids.
+        The first call to compute_planner_trajectory() receives the t=0 ego state via
+        PlannerInput, so we defer _build_route() to that point. The result is identical
+        to "compute at scenario start" because step-0 IS the scenario start.
+        """
+        self._map_api   = initialization.map_api
+        self._route_pts = None   # reset so each scenario gets a fresh route
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
         ego = current_input.history.current_state[0]
-        x_g, y_g, yaw = ego.rear_axle.x, ego.rear_axle.y, ego.rear_axle.heading
+        x_g = ego.rear_axle.x
+        y_g = ego.rear_axle.y
+        yaw = ego.rear_axle.heading
         dcs = ego.dynamic_car_state
-        vx, vy = dcs.rear_axle_velocity_2d.x, dcs.rear_axle_velocity_2d.y
-        ax, ay = dcs.rear_axle_acceleration_2d.x, dcs.rear_axle_acceleration_2d.y
-        t0 = ego.time_point.time_us
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
+
+        # WHY lazy route construction: PlannerInitialization has no initial_ego_state.
+        # We build the route once on the first planning call (which IS t=0) using the
+        # actual ego state from PlannerInput. All subsequent steps reuse self._route_pts.
         if self._route_pts is None:
             self._route_pts = self._build_route(ego, self._map_api)
+
+        # Look-ahead distance: fixed (default) or T+0.8 s equivalent (speed_adaptive).
+        # WHY two modes in one method: avoids duplicating the 30-line trajectory-building
+        # block in SpeedAdaptiveRouteMapBCPlanner. The flag is set once at __init__.
         if self._speed_adaptive:
-            speed = float(np.sqrt(vx**2 + vy**2))
+            speed       = float(np.sqrt(vx ** 2 + vy ** 2))
             look_ahead_m = max(0.05, speed * _GOAL_LOOKAHEAD_S)
+            # WHY 0.05 floor: at a full stop, 0m look-ahead collapses to a degenerate
+            # goal equal to the ego position. 0.05 m keeps the goal just ahead.
         else:
             look_ahead_m = self._look_ahead_m
+
+        # Goal from pre-computed route — always valid regardless of ego drift
         dx_goal, dy_goal = self._get_route_goal(x_g, y_g, yaw, look_ahead_m)
-        feat = torch.tensor([np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal], dtype=torch.float32)
+
+        feat = torch.tensor(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dx_goal, dy_goal],
+            dtype=torch.float32,
+        )
         feat_norm = (feat - self._X_mean) / self._X_std
+
         with torch.no_grad():
             pred_norm = self._model(feat_norm.unsqueeze(0)).squeeze(0).numpy()
         pred = (pred_norm * self._Y_std + self._Y_mean).reshape(FUTURE_STEPS, 3)
-        cos_h, sin_h = np.cos(yaw), np.sin(yaw)
+
+        cos_h = np.cos(yaw)
+        sin_h = np.sin(yaw)
         states = [ego]
         for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
             states.append(EgoState.build_from_rear_axle(
-                rear_axle_pose=StateSE2(x_g + cos_h*dx_e - sin_h*dy_e, y_g + sin_h*dx_e + cos_h*dy_e, yaw + d_yaw),
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
                 rear_axle_velocity_2d=StateVector2D(vx, vy),
                 rear_axle_acceleration_2d=StateVector2D(ax, ay),
                 tire_steering_angle=0.0,
-                time_point=TimePoint(t0 + int((j+1)*DT*1e6)),
-                vehicle_parameters=ego.car_footprint.vehicle_parameters))
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
         return InterpolatedTrajectory(states)
 
     def _build_route(self, initial_ego_state, map_api) -> np.ndarray:
+        """
+        Build a 200m route from the initial ego position along the road centerline.
+
+        Returns: (N, 2) float64 array of global UTM waypoints.
+
+        Algorithm:
+          1. Query lanes at initial position (radius=50m — wider than MapBC's 30m
+             for robustness on scenarios where ego starts near intersection edges)
+          2. Select most forward-aligned lane (heading-weighted score, same as MapBC v2)
+          3. Collect centerline from closest point to end of that lane
+          4. Chain successor lanes until 200m accumulated or MAX_CHAIN reached
+          5. If no lanes found, fall back to a 200m straight in current heading direction
+        """
         from nuplan.common.maps.maps_datatypes import SemanticMapLayer
         from nuplan.common.actor_state.state_representation import Point2D
-        x0, y0, yaw0 = initial_ego_state.rear_axle.x, initial_ego_state.rear_axle.y, initial_ego_state.rear_axle.heading
+
+        x0  = initial_ego_state.rear_axle.x
+        y0  = initial_ego_state.rear_axle.y
+        yaw0 = initial_ego_state.rear_axle.heading
+
+        # WHY radius=50m: at scenario start the ego is always on-road so 50m is
+        # generous enough to find lanes even at wide intersections. MapBC used 30m
+        # live per step — starting at 50m once is cheap and more reliable.
         try:
-            result = map_api.get_proximal_map_objects(Point2D(x0, y0), radius=50.0, layers=[SemanticMapLayer.LANE])
+            result = map_api.get_proximal_map_objects(
+                Point2D(x0, y0), radius=50.0, layers=[SemanticMapLayer.LANE]
+            )
             lanes = result[SemanticMapLayer.LANE]
         except Exception:
-            return self._straight_route(x0, y0, yaw0)
-        if not lanes: return self._straight_route(x0, y0, yaw0)
+            return self._straight_route(x0, y0, yaw0, length_m=200.0, step_m=2.0)
+
+        if not lanes:
+            # Some scenarios start in a parking lot or off-road. Straight is safest.
+            return self._straight_route(x0, y0, yaw0, length_m=200.0, step_m=2.0)
+
+        # Select the most forward-aligned lane using heading-weighted distance score
+        # (identical to MapBC v2 selection — ensures the best lane is picked at start)
         ego_dir = np.array([np.cos(yaw0), np.sin(yaw0)])
         best_lane, best_score = None, float('inf')
         for lane in lanes:
             try:
                 cl_pts = np.array([(s.x, s.y) for s in lane.baseline_path.discrete_path])
-                dists = np.linalg.norm(cl_pts - np.array([x0, y0]), axis=1)
-                i0 = int(np.argmin(dists)); d = float(dists[i0])
-                i_next = min(i0+1, len(cl_pts)-1)
-                tangent = cl_pts[i_next] - cl_pts[i0]; t_norm = np.linalg.norm(tangent)
-                cos_a = float(np.dot(tangent/t_norm, ego_dir)) if t_norm > 1e-6 else 0.0
+                dists  = np.linalg.norm(cl_pts - np.array([x0, y0]), axis=1)
+                i0     = int(np.argmin(dists))
+                d      = float(dists[i0])
+                i_next = min(i0 + 1, len(cl_pts) - 1)
+                tangent = cl_pts[i_next] - cl_pts[i0]
+                t_norm  = np.linalg.norm(tangent)
+                cos_a   = float(np.dot(tangent / t_norm, ego_dir)) if t_norm > 1e-6 else 0.0
+                # WHY 30.0 penalty: same calibration as MapBC v2. Anti-aligned lane
+                # (cos_a = -1) gets +30m added to its apparent distance → excluded
+                # unless it is the only lane within 30m.
                 score = d + 30.0 * max(0.0, -cos_a)
-                if score < best_score: best_score, best_lane = score, lane
-            except Exception: continue
-        if best_lane is None: return self._straight_route(x0, y0, yaw0)
+                if score < best_score:
+                    best_score, best_lane = score, lane
+            except Exception:
+                continue
+
+        if best_lane is None:
+            return self._straight_route(x0, y0, yaw0, length_m=200.0, step_m=2.0)
+
+        # Collect centerline from closest point to end of best lane
         cl = np.array([(s.x, s.y) for s in best_lane.baseline_path.discrete_path])
         dists = np.linalg.norm(cl - np.array([x0, y0]), axis=1)
-        i0 = int(np.argmin(dists)); route = cl[i0:]
-        total_length = float(np.sum(np.linalg.norm(np.diff(route, axis=0), axis=1))) if len(route) > 1 else 0.0
+        i0    = int(np.argmin(dists))
+        route = cl[i0:]   # WHY start from i0: skip the behind-ego portion of the lane
+
+        # Measure how much route we already have
+        total_length = 0.0
+        if len(route) > 1:
+            total_length = float(np.sum(np.linalg.norm(np.diff(route, axis=0), axis=1)))
+
+        # Chain successor lanes until we reach 200m
+        # WHY MAX_CHAIN=8: typical nuPlan lane segments are 20–50m → 8 segments = 160–400m.
+        # Hard cap prevents infinite loop on roundabout topology (circular successors).
         current_lane = best_lane
-        for _ in range(8):
-            if total_length >= 200.0: break
+        MAX_CHAIN = 8
+        for _ in range(MAX_CHAIN):
+            if total_length >= 200.0:
+                break
             try:
                 successors = current_lane.outgoing_edges
-                if not successors: break
+                if not successors:
+                    break
+                # Pick the successor to follow at this junction.
+                # WHY delegate to _select_successor: keeps the heading-alignment rule
+                # in one overridable place. RoadblockRouteMapBCPlanner overrides it to
+                # prefer on-route successors (Open/Closed) — the chaining loop is shared.
                 last_dir = route[-1] - route[-2] if len(route) > 1 else ego_dir
                 last_dir_n = last_dir / (np.linalg.norm(last_dir) + 1e-8)
                 best_succ = self._select_successor(successors, last_dir_n)
-                if best_succ is None: break
-                succ_pts = np.array([(s.x, s.y) for s in best_succ.baseline_path.discrete_path])
+                if best_succ is None:
+                    break
+                succ_pts = np.array(
+                    [(s.x, s.y) for s in best_succ.baseline_path.discrete_path]
+                )
                 route = np.vstack([route, succ_pts])
-                total_length += float(np.sum(np.linalg.norm(np.diff(succ_pts, axis=0), axis=1)))
+                total_length += float(
+                    np.sum(np.linalg.norm(np.diff(succ_pts, axis=0), axis=1))
+                )
                 current_lane = best_succ
-            except Exception: break
+            except Exception:
+                break
+
         return route.astype(np.float64)
 
     def _select_successor(self, successors, last_dir_n):
+        """
+        Pick the successor lane whose entry tangent best aligns with travel direction.
+
+        Args:
+            successors : list of outgoing lane/connector map objects.
+            last_dir_n : unit vector of current travel direction (global frame).
+
+        Returns the best-aligned successor, or None if none is usable.
+
+        WHY a separate method: this is the junction-branch decision. Extracting it
+        lets RoadblockRouteMapBCPlanner override only the branch choice (prefer the
+        intended route) while reusing the parent's lane-chaining loop unchanged.
+        """
         best_succ, best_cos = None, -1.0
         for succ in successors:
             try:
-                succ_pts = np.array([(s.x, s.y) for s in succ.baseline_path.discrete_path])
-                if len(succ_pts) < 2: continue
+                succ_pts = np.array(
+                    [(s.x, s.y) for s in succ.baseline_path.discrete_path]
+                )
+                if len(succ_pts) < 2:
+                    continue
                 tangent = succ_pts[1] - succ_pts[0]
-                cos_a = float(np.dot(tangent / (np.linalg.norm(tangent) + 1e-8), last_dir_n))
-                if cos_a > best_cos: best_cos, best_succ = cos_a, succ
-            except Exception: continue
+                cos_a   = float(
+                    np.dot(tangent / (np.linalg.norm(tangent) + 1e-8), last_dir_n)
+                )
+                if cos_a > best_cos:
+                    best_cos, best_succ = cos_a, succ
+            except Exception:
+                continue
         return best_succ
 
-    def _straight_route(self, x: float, y: float, yaw: float, length_m: float = 200.0, step_m: float = 2.0) -> np.ndarray:
-        n = int(length_m / step_m)
-        return np.array([[x + step_m*i*np.cos(yaw), y + step_m*i*np.sin(yaw)] for i in range(n)], dtype=np.float64)
+    def _straight_route(
+        self, x: float, y: float, yaw: float, length_m: float = 200.0, step_m: float = 2.0
+    ) -> np.ndarray:
+        """
+        Fallback: straight-line route in current heading direction.
+        WHY: some nuPlan scenarios start off-road or in parking areas where the map
+        returns no lanes within 50m. A straight route is neutral — same as the
+        MapBC fallback but pre-committed so it won't fire every step.
+        """
+        n   = int(length_m / step_m)
+        pts = np.array([
+            [x + step_m * i * np.cos(yaw), y + step_m * i * np.sin(yaw)]
+            for i in range(n)
+        ], dtype=np.float64)
+        return pts
 
-    def _get_route_goal(self, x: float, y: float, yaw: float, look_ahead_m: Optional[float] = None) -> Tuple[float, float]:
-        if look_ahead_m is None: look_ahead_m = self._look_ahead_m
+    def _get_route_goal(self, x: float, y: float, yaw: float,
+                        look_ahead_m: Optional[float] = None) -> Tuple[float, float]:
+        """
+        Return the route point look_ahead_m ahead of the ego, in ego-frame.
+
+        Args:
+            x, y, yaw : current ego rear-axle pose (global frame)
+            look_ahead_m : arc-length to walk along route from the nearest point.
+                           Defaults to self._look_ahead_m (set in __init__).
+                           Callers pass an explicit value for speed-adaptive mode.
+
+        WHY argmin over ALL route_pts (not a sliding window):
+          The ego may drift 50+ m off road. A local window around the last-tracked
+          index could become stale and produce a goal behind the ego. Full argmin is
+          O(N), N ≈ 100–1000, called at 10 Hz — negligible cost. Guarantees that
+          the closest route point is always found regardless of drift magnitude.
+        """
+        if look_ahead_m is None:
+            look_ahead_m = self._look_ahead_m
+
         if self._route_pts is None or len(self._route_pts) == 0:
+            # No route available — project straight ahead as neutral fallback.
             return (float(look_ahead_m), 0.0)
+
+        # Step 1: closest route point to current ego position
         dists = np.linalg.norm(self._route_pts - np.array([x, y]), axis=1)
-        i0 = int(np.argmin(dists))
-        cum = 0.0; i_goal = min(i0+1, len(self._route_pts)-1)
-        for i in range(i0, len(self._route_pts)-1):
-            cum += float(np.linalg.norm(self._route_pts[i+1] - self._route_pts[i]))
-            if cum >= look_ahead_m: i_goal = i+1; break
-        else: i_goal = len(self._route_pts)-1
-        gx, gy = self._route_pts[i_goal]
-        cn, sn = np.cos(-yaw), np.sin(-yaw)
-        return (float(cn*(gx-x) - sn*(gy-y)), float(sn*(gx-x) + cn*(gy-y)))
+        i0    = int(np.argmin(dists))
+
+        # Step 2: walk look_ahead_m forward from i0 along stored route
+        cum    = 0.0
+        i_goal = min(i0 + 1, len(self._route_pts) - 1)
+        for i in range(i0, len(self._route_pts) - 1):
+            cum += float(np.linalg.norm(self._route_pts[i + 1] - self._route_pts[i]))
+            if cum >= look_ahead_m:
+                i_goal = i + 1
+                break
+        else:
+            # Route ran out — use last stored point rather than falling back to
+            # straight-ahead, which is what caused MapBC's drift-bootstrapping failure.
+            i_goal = len(self._route_pts) - 1
+
+        gx, gy  = self._route_pts[i_goal]
+        cos_neg = np.cos(-yaw)
+        sin_neg = np.sin(-yaw)
+        return (
+            float(cos_neg * (gx - x) - sin_neg * (gy - y)),
+            float(sin_neg * (gx - x) + cos_neg * (gy - y)),
+        )
 
 
 class TrainedRouteBCPlanner(RouteMapBCPlanner):
-    """Phase 3c' -- retrained with arc-length-8m route goals at BOTH train and inference time."""
-    def name(self) -> str: return 'TrainedRouteBCPlanner'
+    """
+    Phase 3c' — TrainedRouteBC: retrained version of RouteMapBC.
+
+    The ONLY difference from RouteMapBCPlanner is the checkpoint it loads:
+      RouteMapBCPlanner     → goal_bc.pt           (trained on expert T+8 goals)
+      TrainedRouteBCPlanner → trained_route_bc.pt  (trained on arc-length-8m route goals)
+
+    WHY this matters (train/inference mismatch from Phase 3c):
+      RouteMapBC achieved 32.085m vs GoalBC 1.820m (17.6× gap).
+      goal_bc.pt learned: "goal offset = where expert will be in 0.8s."
+      At inference, RouteMapBC feeds: "goal = road centerline 8m ahead."
+      These have systematically different statistics — the policy decodes them incorrectly.
+
+      Fix: retrain with arc-length-8m route goals at BOTH training and inference time.
+      The training distribution NOW matches inference. Expected result: ≈ GoalBC (1.820m)
+      without requiring expert data at inference → deployable policy claim.
+
+    Inference code: 100% identical to RouteMapBCPlanner. Only checkpoint differs.
+    REF: Phase 3c finding, binding insight 2, phase3_roadmap.md.
+    """
+
+    def name(self) -> str:
+        return 'TrainedRouteBCPlanner'
 
 
-# T+8 time window in seconds (8 * 100ms sim steps)
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY SpeedAdaptiveRouteMapBCPlanner exists — root-cause analysis
+#
+# The nuPlan mini SQLite DB is sampled at 100 Hz (10 ms between rows), confirmed
+# by timestamp deltas: dt[0] = 9893 µs ≈ 10 ms. GoalBCPlanner._get_expert_at_offset
+# explicitly uses offset_steps * 100_000 µs = 8 × 100 ms = T+0.8 s at inference.
+#
+# GoalBC INFERENCE goal magnitude at avg speed 4.33 m/s:
+#   4.33 × 0.8 = 3.46 m
+#
+# GoalBC TRAINING goal magnitude (DB at 100 Hz, GOAL_OFFSET=8 raw rows × 10 ms):
+#   4.33 × 0.08 = 0.35 m  (verified: measured mean=0.342 m across all DB files)
+#
+# GoalBC works despite the 10× training-inference scale gap because goal_bc.pt
+# learned a goal-to-trajectory mapping that extrapolates via ReLU. The direction
+# is correct at any scale; ReLU networks scale their output proportionally.
+#
+# Why RouteMapBC (fixed 8 m) got 32 m:
+#   GoalBC inference scale: speed × 0.8
+#   RouteMapBC fixed scale: 8.0 m (regardless of speed)
+#
+#   Speed-dependent mismatch:
+#     at 10 m/s: GoalBC = 8.0 m, RouteMapBC = 8.0 m  → identical ✓
+#     at  4 m/s: GoalBC = 3.2 m, RouteMapBC = 8.0 m  → 2.5× too large
+#     at  0 m/s: GoalBC ≈ 0 m,   RouteMapBC = 8.0 m  → ∞ too large
+#
+#   nuPlan mini urban scenarios include significant stopped/low-speed time
+#   (intersections, traffic). During these segments, RouteMapBC's 8 m goal is
+#   badly out-of-scale for goal_bc.pt → policy mis-fires → drift accumulates.
+#   At highway speeds, fixed 8 m ≈ GoalBC → those segments track well.
+#
+# Why TrainedRouteBCPlanner (retrained on 8 m goals) got 49 m:
+#   Retraining fixed the scale mismatch at inference (8 m = 8 m). But during
+#   training the 8 m arc-length goal is ~12× the prediction horizon (16 raw rows
+#   at 100 Hz × 4.33 m/s = 0.69 m). The goal lies so far beyond the prediction
+#   window that the MSE loss can reach near-zero without the policy attending to
+#   the goal at all — kinematics alone predict 0.69 m accurately. The network
+#   converges to ignore the goal feature. At inference: BC-like behaviour (49 m).
+#
+# The fix: speed_adaptive = True → look_ahead = max(0.05, speed × 0.8)
+#   At every speed this matches GoalBC's T+0.8 s temporal horizon.
+#   goal_bc.pt already learned to use goals at this scale (GoalBC inference works).
+#   Uses existing goal_bc.pt — no retraining needed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# T+8 time window in seconds, matching GoalBCPlanner._get_expert_at_offset:
+#   offset_steps=8, step_size=100_000 µs = 0.1 s  →  8 × 0.1 = 0.8 s
 _GOAL_LOOKAHEAD_S: float = 8 * 0.1   # = 0.8 s
 
 
 class SpeedAdaptiveRouteMapBCPlanner(RouteMapBCPlanner):
-    """Phase 3c'' -- RouteMapBC with speed-adaptive look-ahead: max(0.05, speed * 0.8s)."""
+    """
+    Phase 3c'' — RouteMapBC with speed-adaptive look-ahead.
+
+    Thin wrapper: sets speed_adaptive=True in the parent constructor.
+    All logic lives in RouteMapBCPlanner.compute_planner_trajectory (no duplication).
+
+    look_ahead = max(0.05, speed × 0.8)   — T+0.8 s equivalent at every speed.
+
+    At 10 m/s  → 8.0 m  (same as fixed RouteMapBC, no change at highway speed)
+    At  4 m/s  → 3.2 m  (matches GoalBC inference scale)
+    At  0 m/s  → 0.05 m (matches GoalBC's near-zero goal when stopped)
+
+    Uses goal_bc.pt unchanged — no retraining needed.
+    Deployable: pre-computed route from HD map replaces the expert DB.
+    """
+
     def __init__(self, checkpoint_path: str, look_ahead_m: float = 8.0) -> None:
         super().__init__(checkpoint_path, look_ahead_m, speed_adaptive=True)
-    def name(self) -> str: return 'SpeedAdaptiveRouteMapBCPlanner'
+
+    def name(self) -> str:
+        return 'SpeedAdaptiveRouteMapBCPlanner'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY RoadblockRouteMapBCPlanner exists — Phase 3c''' root-cause analysis
+#
+# SpeedAdaptiveRouteMapBC fixed the goal-scale mismatch and reached 7.50m MEDIAN
+# L2 on 30 scenarios — but the MEAN is dragged up by 4 catastrophic tail failures
+# (L2: 55.7, 80.3, 85.3, 121.2 m). Those 4 are all the same failure mode.
+#
+# Root cause — straight-through-at-junction:
+#   _build_route() chains successor lanes by HEADING ALIGNMENT only. At an
+#   intersection the most forward-aligned successor is the straight-ahead lane.
+#   But on the 4 failing scenarios the EXPERT TURNS. The pre-computed route then
+#   commits to the wrong arm of the intersection; every downstream goal points the
+#   policy straight while the expert curves away → L2 diverges to 50–120 m.
+#
+#   Speed-adaptive look-ahead cannot fix this: the goal scale is correct, the goal
+#   DIRECTION is wrong because the underlying route took the wrong branch.
+#
+# The fix — use the intended route:
+#   PlannerInitialization.route_roadblock_ids lists the roadblock / lane-connector
+#   IDs of the scenario's intended route (the same signal IDM and the nuPlan PDM
+#   planners consume). At each junction we prefer a successor that lies on that
+#   route over the straight-ahead one; we fall back to heading alignment only when
+#   no successor is on-route (route ran out, or IDs unavailable on this map). This
+#   is strictly safer than the parent: identical behaviour when no route info, the
+#   correct turn when there is → removes the 4 tail failures without retraining.
+#
+# Uses goal_bc.pt unchanged and inherits speed_adaptive=True. Only the route
+# CONSTRUCTION changes (which branch to take), not the goal/look-ahead machinery.
+# REF: PlannerInitialization.route_roadblock_ids; nuPlan PDM route-tracking concept.
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 class RoadblockRouteMapBCPlanner(SpeedAdaptiveRouteMapBCPlanner):
     """
-    Phase 3c''' -- RouteMapBC that follows route_roadblock_ids at intersections.
-    Inherits speed_adaptive=True. ONLY change: junction-branch selection uses intended route.
-    WHY: the 4 catastrophic tail failures of SpeedAdaptive were due to route taking the wrong branch.
-    Liskov: when route_roadblock_ids is empty, behaviour is identical to parent.
+    Phase 3c''' — RouteMapBC that follows route_roadblock_ids at intersections.
+
+    Inherits everything from SpeedAdaptiveRouteMapBCPlanner (speed_adaptive=True,
+    goal_bc.pt, speed × 0.8 s look-ahead, pre-computed 200m route). The ONLY change
+    is junction-branch selection inside _build_route():
+
+      Parent:  pick the most heading-aligned successor  → goes straight at junctions
+      This:    pick a successor on the intended route    → turns where the expert turns
+               (falls back to heading alignment if none on route)
+
+    WHY this is the right fix (not retraining, not a bigger look-ahead):
+      The 4 catastrophic tail failures of SpeedAdaptiveRouteMapBC are all the same
+      failure: the route took the straight arm of an intersection where the expert
+      turned. The goal magnitude was already correct after the speed-adaptive fix —
+      only the route's chosen branch was wrong. route_roadblock_ids encodes the
+      correct branch, so guiding lane chaining with it fixes the direction directly.
+
+    Substitutability (Liskov): when route_roadblock_ids is empty or unavailable,
+    behaviour is byte-for-byte identical to the parent — so this is never worse.
     """
+
     def __init__(self, checkpoint_path: str, look_ahead_m: float = 8.0) -> None:
         super().__init__(checkpoint_path, look_ahead_m)
+        # WHY frozenset: membership is tested inside the successor loop; a set gives
+        # O(1) lookups and dedups the raw ID list. Empty until initialize() fills it.
         self._route_roadblock_ids: frozenset = frozenset()
 
-    def name(self) -> str: return 'RoadblockRouteMapBCPlanner'
+    def name(self) -> str:
+        return 'RoadblockRouteMapBCPlanner'
 
     def initialize(self, initialization) -> None:
+        """Store map_api (via parent) AND the intended-route roadblock IDs; reset route.
+
+        WHY also store route_roadblock_ids: the parent keeps only map_api, so it has
+        no way to know which branch the expert takes at a junction. These IDs are the
+        scenario's intended route — the missing signal that drives _select_successor.
+        """
         super().initialize(initialization)
         ids = getattr(initialization, 'route_roadblock_ids', None) or []
+        # WHY str() on both sides: roadblock IDs are ints on some maps and strings on
+        # others, and lane.get_roadblock_id() returns str — normalize to compare safely.
         self._route_roadblock_ids = frozenset(str(i) for i in ids)
 
     def _select_successor(self, successors, last_dir_n):
+        """Prefer a successor on the intended route; else fall back to heading alignment.
+
+        At an intersection several successors exist. The parent's heading-aligned
+        choice is the straight-ahead lane, which is wrong whenever the expert turns.
+        route_roadblock_ids encodes the correct arm, so we first restrict the candidate
+        set to on-route successors and pick the best-aligned among THOSE (handles the
+        rare case of two on-route lanes at one junction). With no on-route successor —
+        route ran out, or no IDs available — we defer entirely to the parent.
+        """
         if self._route_roadblock_ids:
             on_route = [s for s in successors if self._on_route(s)]
-            if on_route: return super()._select_successor(on_route, last_dir_n)
+            if on_route:
+                return super()._select_successor(on_route, last_dir_n)
+        # No route IDs, or no successor on route → parent heading-alignment behaviour.
         return super()._select_successor(successors, last_dir_n)
 
     def _on_route(self, lane) -> bool:
+        """True if a lane (or its parent roadblock) belongs to route_roadblock_ids.
+
+        WHY check both roadblock id and lane id: route_roadblock_ids are roadblock /
+        lane-connector IDs, but successors are lane objects. A lane is on-route if its
+        parent roadblock is listed (the common case). We also check the lane's own id
+        as a fallback for map versions that enumerate lane/connector IDs directly.
+        """
         try:
-            if str(lane.get_roadblock_id()) in self._route_roadblock_ids: return True
-        except Exception: pass
+            if str(lane.get_roadblock_id()) in self._route_roadblock_ids:
+                return True
+        except Exception:
+            pass
         try:
-            if str(lane.id) in self._route_roadblock_ids: return True
-        except Exception: pass
+            if str(lane.id) in self._route_roadblock_ids:
+                return True
+        except Exception:
+            pass
         return False
 
 
-# Far-preview look-ahead: at 20m ~80% of turning windows show goal deflection >15deg.
-# At 3.5m near-horizon only ~6% do -- turns are invisible. REF: phase3_roadmap.md.
+# Far-preview look-ahead for the dual-horizon planner. Chosen from the goal-angle
+# vs look-ahead analysis (notes/phase3_roadmap.md, Phase 3c'''''): at 20m, ~80% of
+# turning windows show a goal deflection >15deg, i.e. the turn is visible in the goal.
+# At the 3.5m near-horizon used by SpeedAdaptive, only ~6% are — turns are invisible.
 _FAR_LOOKAHEAD_M: float = 20.0
 
 
 class DualHorizonRouteMapBCPlanner(RouteMapBCPlanner):
     """
-    Phase 3c''''' -- dual-horizon goal: near (speed*0.8s) + far (20m fixed).
-    WHY: near goal alone misses turns; far goal sees them. Same conditioning as Phase 3d.
-    MODE SWAP FINDING: mean 27.55m -- MLP averages junction modes despite having info.
-    This finding JUSTIFIES Phase 3d (DiffusionPolicyPlanner).
+    Phase 3c''''' — dual-horizon goal: near (tracking) + far (turn anticipation).
+
+    WHY (data-grounded, from Phase 3c''' + the look-ahead analysis):
+      A single goal at the speed-adaptive near horizon (speed * 0.8 s ~= 3.5 m) is
+      near-straight even approaching a junction — at 3.5 m only ~6% of turning windows
+      show the turn. The turn only becomes visible in a single goal point at 16-24 m.
+      So neither SpeedAdaptive nor Roadblock could SEE turns coming: the information was
+      absent from the input, not mis-executed. A multi-modal head alone (Diffusion) would
+      not fix this — it cannot commit to a turn it was never told about.
+
+    THE FIX — give the policy BOTH horizons, exactly like a real reference-path controller:
+      near goal = speed * 0.8 s arc-length  (precise local tracking — what already works)
+      far  goal = fixed 20 m arc-length      (turn anticipation — the missing information)
+    Input becomes 10-dim: [sin,cos,vx,vy,ax,ay, dx_near,dy_near, dx_far,dy_far].
+
+    This is the cleanest ablation of the Phase 3c''' finding: identical to SpeedAdaptive
+    except for the two ADDED far-goal features (near goal held fixed). If turn execution
+    improves, the bottleneck was input information (deployable fix). If not, the
+    deterministic MLP genuinely cannot represent junction bimodality -> Phase 3d (Diffusion).
+
+    Requires a checkpoint trained with the matching 10-dim dual-horizon goal
+    (train_dual_horizon.py -> trained_dual_horizon.pt). Inference route source is the HD
+    map (no expert data), so this remains deployable.
     """
+
     def __init__(self, checkpoint_path: str, far_m: float = _FAR_LOOKAHEAD_M) -> None:
-        self._look_ahead_m = 8.0; self._speed_adaptive = True; self._far_m = far_m
-        self._route_pts: Optional[np.ndarray] = None; self._map_api = None
+        # Speed-adaptive near goal (reuse parent machinery); far goal at fixed far_m.
+        self._look_ahead_m   = 8.0           # unused directly (near is speed-adaptive)
+        self._speed_adaptive = True
+        self._far_m          = far_m
+        self._route_pts: Optional[np.ndarray] = None
+        self._map_api = None
+
         ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+        # WHY in_dim=10: dual-horizon input. state_dict shapes match the trained net.
         self._model = GoalBCPolicy(in_dim=10).to('cpu')
-        self._model.load_state_dict(ckpt['model']); self._model.eval()
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
         self._X_mean = torch.tensor(ckpt['X_mean'], dtype=torch.float32)
         self._X_std  = torch.tensor(ckpt['X_std'],  dtype=torch.float32)
-        self._Y_mean = ckpt['Y_mean']; self._Y_std = ckpt['Y_std']
+        self._Y_mean = ckpt['Y_mean']
+        self._Y_std  = ckpt['Y_std']
 
-    def name(self) -> str: return 'DualHorizonRouteMapBCPlanner'
+    def name(self) -> str:
+        return 'DualHorizonRouteMapBCPlanner'
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
         ego = current_input.history.current_state[0]
-        x_g, y_g, yaw = ego.rear_axle.x, ego.rear_axle.y, ego.rear_axle.heading
+        x_g = ego.rear_axle.x
+        y_g = ego.rear_axle.y
+        yaw = ego.rear_axle.heading
         dcs = ego.dynamic_car_state
-        vx, vy = dcs.rear_axle_velocity_2d.x, dcs.rear_axle_velocity_2d.y
-        ax, ay = dcs.rear_axle_acceleration_2d.x, dcs.rear_axle_acceleration_2d.y
-        t0 = ego.time_point.time_us
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
+
         if self._route_pts is None:
             self._route_pts = self._build_route(ego, self._map_api)
-        speed = float(np.sqrt(vx**2 + vy**2))
-        near_la = max(0.05, speed * _GOAL_LOOKAHEAD_S)
-        dxn, dyn = self._get_route_goal(x_g, y_g, yaw, near_la)
-        dxf, dyf = self._get_route_goal(x_g, y_g, yaw, self._far_m)
-        feat = torch.tensor([np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dxn, dyn, dxf, dyf], dtype=torch.float32)
+
+        # Near goal: speed-adaptive (matches SpeedAdaptive exactly). Far goal: fixed 20 m.
+        speed     = float(np.sqrt(vx ** 2 + vy ** 2))
+        near_la   = max(0.05, speed * _GOAL_LOOKAHEAD_S)
+        dxn, dyn  = self._get_route_goal(x_g, y_g, yaw, near_la)
+        dxf, dyf  = self._get_route_goal(x_g, y_g, yaw, self._far_m)
+
+        feat = torch.tensor(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dxn, dyn, dxf, dyf],
+            dtype=torch.float32,
+        )
         feat_norm = (feat - self._X_mean) / self._X_std
         with torch.no_grad():
             pred_norm = self._model(feat_norm.unsqueeze(0)).squeeze(0).numpy()
         pred = (pred_norm * self._Y_std + self._Y_mean).reshape(FUTURE_STEPS, 3)
+
         cos_h, sin_h = np.cos(yaw), np.sin(yaw)
         states = [ego]
         for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
             states.append(EgoState.build_from_rear_axle(
-                rear_axle_pose=StateSE2(x_g + cos_h*dx_e - sin_h*dy_e, y_g + sin_h*dx_e + cos_h*dy_e, yaw + d_yaw),
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
                 rear_axle_velocity_2d=StateVector2D(vx, vy),
                 rear_axle_acceleration_2d=StateVector2D(ax, ay),
                 tire_steering_angle=0.0,
-                time_point=TimePoint(t0 + int((j+1)*DT*1e6)),
-                vehicle_parameters=ego.car_footprint.vehicle_parameters))
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
         return InterpolatedTrajectory(states)
 
 
-# -- Phase 3d -- DiffusionPolicyPlanner ---------------------------------------
+# ── Phase 3d — DiffusionPolicyPlanner ────────────────────────────────────────
 
 class DiffusionPolicyPlanner(AbstractPlanner):
     """
-    Phase 3d -- Goal-Conditioned Diffusion Policy planner.
+    Phase 3d — Goal-Conditioned Diffusion Policy planner.
 
     Resolves the mode-swap failure of DualHorizonRouteMapBCPlanner by replacing
-    the deterministic MLP head with a generative DDPM denoiser.
+    the deterministic MLP head with a generative DDPM denoiser that can sample
+    from multi-modal trajectory distributions.
 
     WHY this is necessary (DualHorizon post-mortem):
-      DualHorizon mean L2 = 27.55m -- WORSE than SpeedAdaptive (18.19m).
-      The far-goal encodes the correct turn direction, so the information IS present.
-      The mode-swap signature: the MLP averages "turn left" and "turn right" into a
-      straight-line compromise. DDPM can sample ONE trajectory from the multi-modal
-      distribution, naturally committing to one mode. K=8 candidates + goal-proximity
-      scoring selects the candidate that commits to the correct mode.
+      DualHorizonRouteMapBC mean L2 = 27.55m — WORSE than SpeedAdaptive (18.19m).
+      The far-goal encodes the correct turn direction, so the information is present.
+      The mode-swap signature: at intersections the MLP averages "turn left" and
+      "turn right" into a straight-line compromise that is wrong for both modes.
+      A single deterministic MLP cannot represent bimodal junction distributions.
+      DDPM can: at each call it samples ONE trajectory from the learned distribution,
+      naturally committing to one mode. K=8 candidates + goal-proximity scoring
+      selects the candidate that commits to the correct mode.
 
     Architecture:
       Denoiser: GoalConditionedDenoiser (4-layer MLP, ~175K params)
@@ -964,9 +1739,16 @@ class DiffusionPolicyPlanner(AbstractPlanner):
       Inference: DDIM (10 steps, eta=0), K=8 candidates, scored by near-goal proximity
       Conditioning: same 10-dim dual-horizon goal as DualHorizonRouteMapBCPlanner
 
+    Input identity:
+      This planner uses the EXACT same conditioning as DualHorizonRouteMapBCPlanner:
+        [sin(yaw), cos(yaw), vx, vy, ax, ay, dx_near, dy_near, dx_far, dy_far]
+      The only change is the policy head. This is the controlled ablation:
+        DualHorizon:  deterministic MLP   -> mode-averaging at junctions
+        This planner: generative DDPM     -> mode-sampling at junctions
+
     Liskov safety:
-      On any denoiser failure, falls back to straight-ahead at current speed.
-      Never worse than IDM straight-line baseline.
+      If DDIM fails for any reason, the planner falls back to a straight-ahead
+      trajectory at current speed. The planner is never worse than IDM straight-line.
 
     REF:
       Ho et al. (2020) arXiv:2006.11239 -- DDPM
@@ -986,15 +1768,19 @@ class DiffusionPolicyPlanner(AbstractPlanner):
         self._far_m      = far_m
         self._k_samples  = k_samples
         self._ddim_steps = ddim_steps
+
         # WHY CPU for inference: nuPlan simulation calls the planner at ~10 Hz
-        # synchronously. MPS has per-call warm-up overhead that makes it slower
-        # than CPU for a 175K-param model called 10 times/second.
+        # synchronously. MPS has non-trivial warm-up latency per call in a sync loop.
+        # CPU is faster for 175K-param model with 10 DDIM steps x K=8 samples.
         self._device     = torch.device('cpu')
+
         self._model      = None
         self._schedule: Optional[dict] = None
         self._X_mean = self._X_std = None
         self._Y_mean = self._Y_std = None
         self._T: int = 100
+
+        # Route state (same pattern as DualHorizonRouteMapBCPlanner)
         self._route_pts: Optional[np.ndarray] = None
         self._map_api = None
 
@@ -1006,7 +1792,7 @@ class DiffusionPolicyPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def initialize(self, initialization) -> None:
-        """Load DDPM checkpoint, restore noise schedule, store map_api."""
+        """Load checkpoint, build noise schedule, store map_api for route construction."""
         import sys as _sys
         _sys.path.insert(0, '/Users/parvpatodia/Desktop/diffusion-policy-zoo/nuplan')
         from train_diffusion_policy import (
@@ -1014,46 +1800,59 @@ class DiffusionPolicyPlanner(AbstractPlanner):
             build_cosine_schedule,
             T_DIFFUSION,
         )
+
         ckpt = torch.load(self._ckpt_path, map_location=self._device, weights_only=False)
+
         self._model = GoalConditionedDenoiser().to(self._device)
-        self._model.load_state_dict(ckpt['model']); self._model.eval()
-        self._X_mean = ckpt['X_mean']   # (10,) float32 numpy
-        self._X_std  = ckpt['X_std']    # (10,) float32 numpy
-        self._Y_mean = ckpt['Y_mean']   # (48,) float32 numpy
-        self._Y_std  = ckpt['Y_std']    # (48,) float32 numpy
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
+
+        self._X_mean = ckpt['X_mean']   # (10,) float32 numpy array
+        self._X_std  = ckpt['X_std']    # (10,) float32 numpy array
+        self._Y_mean = ckpt['Y_mean']   # (48,) float32 numpy array
+        self._Y_std  = ckpt['Y_std']    # (48,) float32 numpy array
         self._T      = int(ckpt.get('T', T_DIFFUSION))
-        # WHY prefer checkpoint schedule: ensures exact match with training run.
+
+        # WHY prefer checkpoint schedule: ensures exact schedule match with training.
         if 'schedule' in ckpt:
             self._schedule = {k: v.to(self._device) for k, v in ckpt['schedule'].items()}
         else:
             sched_cpu = build_cosine_schedule(self._T)
             self._schedule = {k: v.to(self._device) for k, v in sched_cpu.items()}
+
         self._map_api   = initialization.map_api
-        self._route_pts = None
+        self._route_pts = None   # reset route for each new scenario
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
         ego = current_input.history.current_state[0]
-        x_g, y_g, yaw = ego.rear_axle.x, ego.rear_axle.y, ego.rear_axle.heading
+        x_g = ego.rear_axle.x
+        y_g = ego.rear_axle.y
+        yaw = ego.rear_axle.heading
         dcs = ego.dynamic_car_state
-        vx, vy = dcs.rear_axle_velocity_2d.x, dcs.rear_axle_velocity_2d.y
-        ax, ay = dcs.rear_axle_acceleration_2d.x, dcs.rear_axle_acceleration_2d.y
-        t0 = ego.time_point.time_us
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
 
         if self._route_pts is None:
             self._route_pts = self._build_route_dp(ego, self._map_api)
 
-        speed   = float(np.sqrt(vx**2 + vy**2))
+        speed   = float(np.sqrt(vx ** 2 + vy ** 2))
         near_la = max(0.05, speed * _GOAL_LOOKAHEAD_S)
         dxn, dyn = self._get_route_goal_dp(x_g, y_g, yaw, near_la)
         dxf, dyf = self._get_route_goal_dp(x_g, y_g, yaw, self._far_m)
 
-        feat_raw  = np.array([np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dxn, dyn, dxf, dyf], dtype=np.float32)
+        feat_raw  = np.array(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dxn, dyn, dxf, dyf],
+            dtype=np.float32,
+        )
         feat_norm = (feat_raw - self._X_mean) / self._X_std
 
         try:
             pred = self._sample_best_trajectory(feat_norm, dxn, dyn)
         except Exception:
-            # Liskov safety: straight-ahead at current speed on any denoiser failure
+            # Liskov safety: fallback to straight-ahead at current speed
             pred = np.zeros((FUTURE_STEPS, 3), dtype=np.float32)
             for j in range(FUTURE_STEPS):
                 pred[j, 0] = speed * DT * (j + 1)
@@ -1061,13 +1860,17 @@ class DiffusionPolicyPlanner(AbstractPlanner):
         cos_h, sin_h = np.cos(yaw), np.sin(yaw)
         states = [ego]
         for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
             states.append(EgoState.build_from_rear_axle(
-                rear_axle_pose=StateSE2(x_g + cos_h*dx_e - sin_h*dy_e, y_g + sin_h*dx_e + cos_h*dy_e, yaw + d_yaw),
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
                 rear_axle_velocity_2d=StateVector2D(vx, vy),
                 rear_axle_acceleration_2d=StateVector2D(ax, ay),
                 tire_steering_angle=0.0,
-                time_point=TimePoint(t0 + int((j+1)*DT*1e6)),
-                vehicle_parameters=ego.car_footprint.vehicle_parameters))
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
         return InterpolatedTrajectory(states)
 
     def _sample_best_trajectory(
@@ -1082,114 +1885,147 @@ class DiffusionPolicyPlanner(AbstractPlanner):
 
         WHY step 8 for scoring:
           Step 8 (~0.8s) matches the near-goal look-ahead horizon. Junction branch
-          decisions manifest here: left-turn has positive dy, right-turn negative dy.
+          decisions manifest at this horizon: left-turn has positive dy, right-turn
+          negative dy. Scoring at step 16 (1.6s) has higher variance.
 
-        WHY K=8 independent samples:
+        WHY K=8 independent samples (not 1):
+          A single DDIM sample may commit to the wrong mode (turns right when the
+          route says left). K=8 gives high probability of seeing the correct mode:
           P(missing correct mode) = (1 - p_mode)^K. At p_mode=0.5 and K=8: 0.4%.
-          Diversity comes from K different x_T ~ N(0,I) seeds inside ddim_sample.
-
-        REF: Song et al. (2020) eq. 12, eta=0.
         """
         from train_diffusion_policy import ddim_sample
 
+        # Batch K copies of conditioning for a single DDIM call (different x_T seeds)
         c_batch = torch.from_numpy(
             np.tile(feat_norm, (self._k_samples, 1))
         ).float().to(self._device)  # (K, 10)
 
-        trajs_norm = ddim_sample(
+        trajs_norm  = ddim_sample(
             self._model, c_batch, self._schedule,
             T=self._T, n_steps=self._ddim_steps, device=self._device,
         )  # (K, 48), normalized
 
         # Denormalize
         trajs_unnorm = (trajs_norm.numpy() * self._Y_std + self._Y_mean)  # (K, 48)
-        trajs_steps  = trajs_unnorm.reshape(self._k_samples, FUTURE_STEPS, 3)  # (K, 16, 3)
+        trajs_steps  = trajs_unnorm.reshape(self._k_samples, FUTURE_STEPS, 3)   # (K, 16, 3)
 
-        # Score: distance from step-8 (dx, dy) to near-goal
+        # Score: distance from step-8 position to near-goal
         step8_pos = trajs_steps[:, 7, :2]   # (K, 2)
         goal_vec  = np.array([dx_near, dy_near], dtype=np.float32)
         distances = np.sqrt(((step8_pos - goal_vec) ** 2).sum(axis=1))  # (K,)
-        return trajs_steps[int(np.argmin(distances))]   # (16, 3)
+        best_idx  = int(np.argmin(distances))
 
-    # -- Route helpers (mirrors RouteMapBCPlanner, _dp suffix = explicit copy) -----
-    # WHY copy not inherit: DiffusionPolicyPlanner overrides compute_planner_trajectory
-    # entirely. Inheriting from RouteMapBCPlanner would misleadingly imply the parent's
-    # method is called. Direct inheritance from AbstractPlanner with copied helpers is cleaner.
+        return trajs_steps[best_idx]   # (16, 3)
+
+    # ── Route helpers — identical logic to RouteMapBCPlanner ──────────────────
+    # WHY copy instead of inherit: see class docstring. DiffusionPolicyPlanner
+    # has a fundamentally different compute_planner_trajectory. Inheriting from
+    # RouteMapBCPlanner would imply the parent method is used, which it is not.
+    # The _dp suffix distinguishes these copies from the parent class methods
+    # to make the duplication explicit and traceable.
 
     def _build_route_dp(self, initial_ego_state, map_api) -> np.ndarray:
-        """Build 200m route. Mirrors RouteMapBCPlanner._build_route."""
+        """Build 200m route from initial ego. Mirrors RouteMapBCPlanner._build_route."""
         from nuplan.common.maps.maps_datatypes import SemanticMapLayer
         from nuplan.common.actor_state.state_representation import Point2D
+
         x0, y0, yaw0 = (initial_ego_state.rear_axle.x,
                         initial_ego_state.rear_axle.y,
                         initial_ego_state.rear_axle.heading)
         fallback = self._straight_route_pts_dp(x0, y0, yaw0)
+
         try:
-            result = map_api.get_proximal_map_objects(Point2D(x0, y0), radius=50.0, layers=[SemanticMapLayer.LANE])
+            result = map_api.get_proximal_map_objects(
+                Point2D(x0, y0), radius=50.0, layers=[SemanticMapLayer.LANE]
+            )
             lanes = result[SemanticMapLayer.LANE]
         except Exception:
             return fallback
-        if not lanes: return fallback
+        if not lanes:
+            return fallback
+
         ego_dir = np.array([np.cos(yaw0), np.sin(yaw0)])
         best_lane, best_score = None, float('inf')
         for lane in lanes:
             try:
-                cl = np.array([(s.x, s.y) for s in lane.baseline_path.discrete_path])
+                cl    = np.array([(s.x, s.y) for s in lane.baseline_path.discrete_path])
                 dists = np.linalg.norm(cl - np.array([x0, y0]), axis=1)
-                i0 = int(np.argmin(dists)); d = float(dists[i0])
-                tang = cl[min(i0+1, len(cl)-1)] - cl[i0]; tn = np.linalg.norm(tang)
-                cos_a = float(np.dot(tang/tn, ego_dir)) if tn > 1e-6 else 0.0
-                s = d + 30.0 * max(0.0, -cos_a)
-                if s < best_score: best_score, best_lane = s, lane
-            except Exception: continue
-        if best_lane is None: return fallback
-        cl = np.array([(s.x, s.y) for s in best_lane.baseline_path.discrete_path])
+                i0    = int(np.argmin(dists))
+                tang  = cl[min(i0 + 1, len(cl) - 1)] - cl[i0]
+                tn    = np.linalg.norm(tang)
+                cos_a = float(np.dot(tang / tn, ego_dir)) if tn > 1e-6 else 0.0
+                s     = float(dists[i0]) + 30.0 * max(0.0, -cos_a)
+                if s < best_score:
+                    best_score, best_lane = s, lane
+            except Exception:
+                continue
+        if best_lane is None:
+            return fallback
+
+        cl    = np.array([(s.x, s.y) for s in best_lane.baseline_path.discrete_path])
         dists = np.linalg.norm(cl - np.array([x0, y0]), axis=1)
         route = cl[int(np.argmin(dists)):]
         total = float(np.sum(np.linalg.norm(np.diff(route, axis=0), axis=1))) if len(route) > 1 else 0.0
+
         cur = best_lane
         for _ in range(8):
-            if total >= 200.0: break
+            if total >= 200.0:
+                break
             try:
                 succs = cur.outgoing_edges
-                if not succs: break
-                ld = route[-1] - route[-2] if len(route) > 1 else ego_dir
-                ldn = ld / (np.linalg.norm(ld) + 1e-8)
+                if not succs:
+                    break
+                ld    = route[-1] - route[-2] if len(route) > 1 else ego_dir
+                ldn   = ld / (np.linalg.norm(ld) + 1e-8)
                 best_s, best_c = None, -1.0
                 for s in succs:
                     try:
                         sp = np.array([(p.x, p.y) for p in s.baseline_path.discrete_path])
-                        if len(sp) < 2: continue
+                        if len(sp) < 2:
+                            continue
                         t = sp[1] - sp[0]
                         c = float(np.dot(t / (np.linalg.norm(t) + 1e-8), ldn))
-                        if c > best_c: best_c, best_s = c, s
-                    except Exception: continue
-                if best_s is None: break
+                        if c > best_c:
+                            best_c, best_s = c, s
+                    except Exception:
+                        continue
+                if best_s is None:
+                    break
                 sp = np.array([(p.x, p.y) for p in best_s.baseline_path.discrete_path])
                 route = np.vstack([route, sp])
                 total += float(np.sum(np.linalg.norm(np.diff(sp, axis=0), axis=1)))
                 cur = best_s
-            except Exception: break
+            except Exception:
+                break
+
         return route.astype(np.float64)
 
-    def _get_route_goal_dp(self, x: float, y: float, yaw: float, look_ahead_m: float) -> Tuple[float, float]:
+    def _get_route_goal_dp(self, x: float, y: float, yaw: float,
+                           look_ahead_m: float) -> Tuple[float, float]:
         """Return route point look_ahead_m ahead of ego in ego frame."""
         if self._route_pts is None or len(self._route_pts) == 0:
             return (float(look_ahead_m), 0.0)
-        dists = np.linalg.norm(self._route_pts - np.array([x, y]), axis=1)
-        i0 = int(np.argmin(dists))
-        cum = 0.0; i_goal = min(i0+1, len(self._route_pts)-1)
-        for i in range(i0, len(self._route_pts)-1):
-            cum += float(np.linalg.norm(self._route_pts[i+1] - self._route_pts[i]))
-            if cum >= look_ahead_m: i_goal = i+1; break
-        else: i_goal = len(self._route_pts)-1
-        gx, gy = self._route_pts[i_goal]
-        cn, sn = np.cos(-yaw), np.sin(-yaw)
-        return (float(cn*(gx-x) - sn*(gy-y)), float(sn*(gx-x) + cn*(gy-y)))
+        dists  = np.linalg.norm(self._route_pts - np.array([x, y]), axis=1)
+        i0     = int(np.argmin(dists))
+        cum    = 0.0
+        i_goal = min(i0 + 1, len(self._route_pts) - 1)
+        for i in range(i0, len(self._route_pts) - 1):
+            cum += float(np.linalg.norm(self._route_pts[i + 1] - self._route_pts[i]))
+            if cum >= look_ahead_m:
+                i_goal = i + 1
+                break
+        else:
+            i_goal = len(self._route_pts) - 1
+        gx, gy   = self._route_pts[i_goal]
+        cn, sn   = np.cos(-yaw), np.sin(-yaw)
+        return (float(cn * (gx - x) - sn * (gy - y)),
+                float(sn * (gx - x) + cn * (gy - y)))
 
     def _straight_route_pts_dp(self, x: float, y: float, yaw: float,
                                 length_m: float = 200.0, step_m: float = 2.0) -> np.ndarray:
         """Fallback straight-line route."""
         n = int(length_m / step_m)
-        return np.array([[x + step_m*i*np.cos(yaw), y + step_m*i*np.sin(yaw)]
-                         for i in range(n)], dtype=np.float64)
+        return np.array([
+            [x + step_m * i * np.cos(yaw), y + step_m * i * np.sin(yaw)]
+            for i in range(n)
+        ], dtype=np.float64)

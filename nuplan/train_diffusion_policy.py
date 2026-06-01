@@ -281,12 +281,15 @@ def ddim_sample(
     B = c.shape[0]
 
     # Build evenly-spaced DDIM timestep sub-sequence: T, ..., 1
-    # WHY include t=1 (not t=0): schedule indexing uses 1-based t; alpha_bar[0]=1.0 is the
-    # clean data anchor. The final DDIM step goes from t=1 to t_prev=0 (i.e., clean x_0).
-    step_size = T // n_steps
-    timesteps = list(range(T, 0, -step_size))  # e.g. [100, 90, 80, ..., 10] for n_steps=10
-    if timesteps[-1] != 1:
-        timesteps.append(1)   # WHY: ensure the final DDIM step reaches t=1
+    # WHY np.linspace not range(): range(T, 0, -step_size) produces n_steps items starting at T
+    # and ending at T - (n_steps-1)*step_size. For T=100, n_steps=10 that ends at 10, then the
+    # "if timesteps[-1] != 1: append(1)" always fires (100 % 10 == 0 → 10 ≠ 1), producing 11
+    # steps with uneven spacing at the tail — violating DDIM's uniform-spacing assumption.
+    # np.linspace(1, T, n_steps) gives exactly n_steps values with equal spacing, anchored
+    # at t=1 (the final denoising step) and t=T (start). Sorting descending gives the correct
+    # denoising order. For T=100, n_steps=10: [100, 89, 78, 67, 56, 45, 34, 23, 12, 1].
+    timestep_arr = np.round(np.linspace(1, T, n_steps)).astype(int)
+    timesteps    = sorted(set(timestep_arr.tolist()), reverse=True)  # descending, deduplicated
 
     # Pull schedule tensors to device
     sqrt_ab   = schedule['sqrt_ab'].to(device)    # (T+1,)
@@ -641,9 +644,17 @@ def main():
 
         train_loss /= len(tdl)
 
-        # Validation: DDPM noise-prediction MSE on val set
+        # Validation: DDPM noise-prediction MSE on val set.
+        # WHY seed before val loop: t_batch and eps are sampled randomly each epoch.
+        # Without a seed, val_loss is a stochastic estimator whose variance can trigger
+        # ReduceLROnPlateau on noise rather than real loss improvement, and makes
+        # best_val checkpoint selection unreliable across runs. We seed with the epoch
+        # index so the stochasticity is different each epoch (exploration benefit) but
+        # deterministic within an epoch (reproducible comparison across code changes).
         denoiser.eval()
         val_loss = 0.0
+        torch.manual_seed(ep)       # deterministic val noise per epoch
+        np.random.seed(ep)
         with torch.no_grad():
             for xb, yb in vdl:
                 xb, yb = xb.to(DEVICE), yb.to(DEVICE)
@@ -655,6 +666,9 @@ def main():
                 eps_pred     = denoiser(xt, t_batch, xb)
                 val_loss    += crit(eps_pred, eps).item()
         val_loss /= len(vdl)
+        # Restore training RNG to non-seeded state so training batches remain stochastic
+        torch.seed()
+        np.random.seed(None)
 
         sched_lr.step(val_loss)
 
