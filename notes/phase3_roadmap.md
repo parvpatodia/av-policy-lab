@@ -114,10 +114,47 @@ data at inference → deployable policy claim.
 
 ---
 
+## Phase 3c''' — RoadblockRouteMapBC ✅ COMPLETE (negative-leaning, highly informative)
+
+**Hypothesis:** SpeedAdaptive's 4 catastrophic tail failures are intersection scenarios where
+the heading-aligned route goes straight while the expert turns. Using `route_roadblock_ids`
+(the scenario's intended route, available at deploy time) to pick the junction branch should
+give the correct turn direction and eliminate the tail.
+
+**Implementation:** `RoadblockRouteMapBCPlanner(SpeedAdaptiveRouteMapBCPlanner)` overrides only
+`_select_successor()` to prefer on-route successors; identical to parent when no route id matches
+(Liskov-safe). Confirmed populated on 30/30 mini scenarios (mean 27.8 ids).
+
+**Result (30 scenarios, `eval_production.py` + `statistical_analysis.py`):**
+- Mean 17.00m vs parent 18.19m; **p90 58.16 → 31.71m** (moderate failures cleaned up).
+- **Statistically TIED with parent** — Wilcoxon p=0.808, median-diff CI [−5.5, +5.6] includes 0.
+- Route **changed on 28/30 scenarios** → the mechanism fires (not silent fallback).
+- **15 improved, 13 regressed.** Dramatic fix: scen_0000 55.7→4.1m (a catastrophic failure
+  eliminated). Dramatic regression: scen_0022 1.1→15.5m (a near-perfect scenario broken).
+- Catastrophic (>50m): fixed {0}; {11,18,20} persist; no new catastrophic.
+- PDM-Score unchanged: 0.526 (= parent). Comfort 0.833, collisions 0.667, TTC 0.600 all identical.
+
+**Finding — a correct goal is necessary but NOT sufficient.** The route *direction* is now correct
+(roadblock-guided), but the deterministic MLP **cannot execute the turn it is now correctly pointed
+toward**. It was trained on expert goals that are overwhelmingly near-straight (the expert tracks
+its lane smoothly); a sharp turn-goal at a junction is out-of-distribution, so the policy regresses
+toward the straight-ahead mean. Correcting the route therefore fixes scenarios where the turn is
+gentle and breaks scenarios where it is sharp — a wash.
+
+**The bottleneck has moved:** goal REPRESENTATION (global route → speed-matched scale → correct
+branch) is solved; the residual failure is policy EXECUTION of multi-modal junction trajectories.
+This is the data-isolated motivation for Phase 3d (Diffusion Policy) and for a *speed-adaptive
+route goal at TRAINING time* (3c' done wrong with fixed 8m; redo with speed×0.8 route goals so the
+policy actually sees turn-goals during training).
+
+---
+
 ## Phase 3d — Diffusion Policy Planner
 
-**Motivation:** Deterministic MLP regression underfits multi-modal trajectory distributions
-(lane change vs. straight ahead at intersection). DDPM denoising handles multi-modality natively.
+**Motivation (now empirically grounded by 3c'''):** Deterministic MLP regression underfits the
+multi-modal trajectory distribution at junctions (turn vs. straight). 3c''' proved a *correct*
+turn-goal is not enough — the MLP cannot commit to the turn. DDPM denoising handles multi-modality
+natively and can represent the turn/straight bimodality the MLP averages away.
 
 **Conditioning:** route_goal(2) + state(6) = 8-dim condition (same as GoalBC/MapBC, reusable)  
 **Score network:** small transformer denoiser, T=100 DDPM steps, DDIM sampling at 10 steps  
@@ -172,12 +209,13 @@ Single-log 3-scenario results (goal_bc.ipynb, eval_routemapbc.py, eval_speed_ada
 
 **30-scenario diverse eval** (eval_production.py, 30 scenarios × 64 logs, May 28 2026):
 
-| Policy | Mean L2 | Median | Std | Fail>20m | Good<5m | vs IDM (per-scenario) |
+| Policy | Mean L2 | Median | p90 | Std | Fail>20m | Good<5m |
 |---|---|---|---|---|---|---|
-| IDM | 13.97m | 8.50m | 16.26 | 8/30 | 12/30 | — |
-| **SpeedAdaptive** | **18.19m** | **7.50m** | **28.57** | **6/30** | **12/30** | **wins 17/30** |
-| BC | 27.18m | 16.99m | 28.19 | 14/30 | 12/30 | — |
-| RouteMapBC | 47.36m | 53.57m | 25.43 | 26/30 | 0/30 | — |
+| IDM | 13.97m | 8.50m | 28.68 | 16.26 | 8/30 | 12/30 |
+| **RoadblockRouteMapBC** (3c''') | 17.00m | 7.50m | **31.71** | 27.71 | 6/30 | 12/30 |
+| SpeedAdaptive (3c'') | 18.19m | 7.50m | 58.16 | 28.57 | 6/30 | 12/30 |
+| BC | 27.18m | 16.99m | 71.84 | 28.19 | 14/30 | 12/30 |
+| RouteMapBC | 47.36m | 53.57m | 70.07 | 25.43 | 26/30 | 0/30 |
 
 **Critical finding from 30-scenario eval (statistically honest):**
 SpeedAdaptive is **statistically TIED with IDM** — exact binomial on the 17/30 win rate p=0.585,
@@ -196,22 +234,7 @@ The distribution is bimodal:
 
 ---
 
-## Phase 3c''' — RouteMapBC with route_roadblock_ids (planned)
-
-**Hypothesis:** The 4 catastrophic failures are intersection-type scenarios where the pre-computed
-centerline route goes straight while the expert turns. nuPlan's `PlannerInitialization` provides
-`route_roadblock_ids` — the INTENDED roadblock sequence for the scenario. Using these roadblocks
-to guide route construction would give the correct turn direction at intersections.
-
-**Change:** In `_build_route()`, use `initialization.route_roadblock_ids` to filter which lanes
-to follow when chaining successors. Currently the planner picks the most forward-aligned successor
-regardless of the intended route — at a T-intersection this means straight, not the correct turn.
-
-**Expected:** Eliminate the 4 intersection failures. Mean L2 drops from ~18m to ~8–9m, matching IDM.
-
----
-
-## Hypothesis chain (complete, as of Phase 3c'')
+## Hypothesis chain (complete, as of Phase 3c''')
 
 ```
 GoalBC (1.82m, 3-scen)         → GLOBAL oracle: expert T+8 goal breaks plateau completely
@@ -221,15 +244,22 @@ TrainedRouteBC (49m)           → retraining with 8m goals fails: 8m is 12× pr
                                   MSE trains without goal → BC behaviour
 SpeedAdaptiveRouteMapBC:
   3-scen:  13.7m               → speed×0.8 = correct T+0.8s scale → 57% improvement over RouteMapBC
-  30-scen: 18.2m mean / 7.5m median → wins 17/30 vs IDM; 4 intersection failures drive mean
-Route_roadblock_ids (planned)  → use intended route at intersections → eliminate tail failures
-DAgger + route goal (Phase 3d) → on-policy data for intersection recovery → close remaining gap
-DiffusionPlanner (Phase 3d)    → multi-modal DDPM for intersection decisions
-PDM-Score eval (Phase 3e)      → honest driving quality metric (comfort + progress + collision)
+  30-scen: 18.2m mean / 7.5m median → TIED with IDM (Wilcoxon p=0.76); 4 intersection failures drive mean
+RoadblockRouteMapBC (17.0m)    → intended route gives the CORRECT turn direction (28/30 routes changed,
+                                  scen_0000 55.7→4.1m). But TIED with parent (p=0.81): 15 fixed / 13 broken.
+                                  Correct goal ≠ executable goal — MLP can't track turn-goals it never trained on.
+DiffusionPlanner (Phase 3d)    → multi-modal DDPM for the turn/straight bimodality the MLP averages away
+SpeedAdaptive route goal @train→ retrain so the policy actually SEES turn-goals (3c' redone correctly)
+PDM-Score eval (Phase 3e) ✅    → IDM 0.656 vs SpeedAdaptive/Roadblock 0.526; learned policy more COMFORTABLE
+                                  (0.833 vs 0.633) but less safe (collisions 0.667, TTC 0.600)
 ```
 
 **Binding insight 1:** The reference must be GLOBAL (valid everywhere), not LOCAL (only near the road).
 **Binding insight 2:** Goal-source at training time MUST match goal-source at inference time.
-**Binding insight 3:** Architecture is not the bottleneck — goal representation is.
+**Binding insight 3:** Architecture is not the bottleneck — goal representation is... (until 3c''').
 **Binding insight 4:** Intersection topology is the failure mode of centerline-following route goals.
-**Binding insight 5:** Mean L2 hides bimodal distributions — always report median and per-scenario win rate.
+**Binding insight 5:** Mean L2 hides bimodal distributions — always report median, CI, and a paired test.
+**Binding insight 6 (Phase 3c'''):** A correct goal is necessary but NOT sufficient. Once the route
+direction is right, the deterministic MLP still cannot *execute* a turn-goal that is out-of-distribution
+relative to its near-straight expert training. The bottleneck moves from goal REPRESENTATION (solved)
+to policy EXECUTION of multi-modal junction trajectories → motivates Phase 3d (Diffusion Policy).

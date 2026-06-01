@@ -27,7 +27,22 @@
 - Sliding Window: Best Time Buy/Sell, Longest Substring, Longest Repeating Char, Permutation in String, Sliding Window Maximum, Minimum Window Substring ✅ (6)
 - Binary Search: next section
 
-## AV-Policy-Lab Results — Phase 3c'' COMPLETE + 30-Scenario Production Eval
+## AV-Policy-Lab Results — Phase 3c''' COMPLETE (RoadblockRouteMapBC) + PDM-Score
+
+**Phase 3c''' result (the pivot):** RoadblockRouteMapBC uses route_roadblock_ids for the
+correct junction branch. Mean 17.0m (parent 18.2m), p90 58→32m, but **statistically TIED**
+with parent (Wilcoxon p=0.808): route changed on 28/30 scenarios, 15 improved / 13 regressed.
+scen_0000 fixed 55.7→4.1m; scen_0022 broke 1.1→15.5m. **Finding: correct goal ≠ executable
+goal.** The MLP can't track turn-goals it never trained on (near-straight expert data).
+Bottleneck moved: goal REPRESENTATION solved → policy EXECUTION of turns is the new target.
+**Next: Phase 3d Diffusion Policy** (multi-modal head for turn/straight bimodality).
+
+**PDM-Score (real driving quality):** IDM 0.656 > SpeedAdaptive/Roadblock 0.526. Learned policy
+is MORE comfortable (0.833 vs 0.633), less safe (collision 0.667 vs 0.850, TTC 0.600 vs 0.767).
+
+---
+
+## AV-Policy-Lab Results — Phase 3c'' + 30-Scenario Production Eval
 
 ### 30-scenario diverse eval (May 28, 30 scenarios × 64 logs)
 | Policy | Mean | Median | Std | Fail>20m | Good<5m |

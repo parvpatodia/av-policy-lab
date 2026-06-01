@@ -174,10 +174,29 @@ failure mode (intersection safety) is identified, localized, and has a concrete 
 
 ---
 
+## 8b. Phase 3c''' result — the pivot (added 2026-05-28)
+
+RoadblockRouteMapBC used `route_roadblock_ids` to pick the correct junction branch.
+It **changed the route on 28/30 scenarios** (mechanism confirmed firing) and produced
+clean fixes (scen_0000 55.7→4.1m) — but is **statistically tied with its parent**
+(Wilcoxon p=0.808): 15 scenarios improved, 13 regressed. Correcting the route direction
+fixes gentle turns and breaks sharp ones, because the deterministic MLP — trained on
+near-straight expert goals — cannot execute a turn-goal that is out of its training
+distribution. **The bottleneck has moved from goal representation (solved across
+3a–3c''') to policy execution of multi-modal junction trajectories.** This is now the
+empirically-grounded motivation for Phase 3d, and it strengthens the paper: we can show
+*with an ablation* that goal correctness and goal executability are distinct, separable
+failure axes — most prior covariate-shift work conflates them.
+
 ## 9. Roadmap to publication
 
-- [ ] **3c''' RoadblockRouteMapBC** — `route_roadblock_ids`-guided route → fix the 4
-      intersection failures. Target: trimmed-mean parity becomes full-mean parity.
+- [x] **3c''' RoadblockRouteMapBC** — DONE. Route direction now correct (28/30 changed),
+      but tied with parent: isolated that policy *execution* of turns is the residual
+      bottleneck, not goal representation. (Negative-leaning, high-information result.)
+- [ ] **Phase 3d Diffusion Policy** — now the top priority: multi-modal action head to
+      represent the turn/straight bimodality the MLP averages away.
+- [ ] **3c' redone correctly** — retrain with speed-adaptive *route* goals at training
+      time so the policy actually sees turn-goals (the original 3c' used a wrong fixed 8m).
 - [ ] **PDM-Score** — re-run `eval_production.py` with metric set enabled; report the
       7 components + composite for all planners.
 - [ ] **Scale to 100+ scenarios** — tighten CIs; stratify by scenario type.

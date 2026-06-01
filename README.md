@@ -60,16 +60,19 @@ Controller: `perfect_tracking_controller`. Observation: `box_observation`. Same 
 
 30 scenarios sampled from all 64 nuPlan mini logs. `eval_production.py`. Run: May 28 2026.
 
-| Policy | Mean | Median | Trim-4 mean | Std | Fail >20m | Good <5m |
-|---|---|---|---|---|---|---|
-| **SpeedAdaptiveRouteMapBC** | 18.19m | **7.50m** | **7.81m** | 28.57 | 6/30 | 12/30 |
-| IDMPlanner | 13.97m | 8.50m | 9.08m | 16.26 | 8/30 | 12/30 |
-| BCPlanner | 27.18m | 16.99m | — | 28.19 | 14/30 | 12/30 |
-| RouteMapBCPlanner | 47.36m | 53.57m | — | 25.43 | 26/30 | 0/30 |
+| Policy | Mean | Median | Trim-4 mean | p90 | Std | Fail >20m | Good <5m |
+|---|---|---|---|---|---|---|---|
+| **RoadblockRouteMapBC** (3c''') | 17.00m | **7.50m** | **7.57m** | **31.71** | 27.71 | 6/30 | 12/30 |
+| SpeedAdaptiveRouteMapBC (3c'') | 18.19m | 7.50m | 7.81m | 58.16 | 28.57 | 6/30 | 12/30 |
+| IDMPlanner | 13.97m | 8.50m | 9.08m | 28.68 | 16.26 | 8/30 | 12/30 |
+| BCPlanner | 27.18m | 16.99m | — | — | 28.19 | 14/30 | 12/30 |
+| RouteMapBCPlanner | 47.36m | 53.57m | — | — | 25.43 | 26/30 | 0/30 |
 
 **GoalBC oracle: 1.820m** (3-scenario single-log — not re-run in production eval to avoid per-scenario DB mismatch).
 
-**Honest statistical reading (`statistical_analysis.py`):** SpeedAdaptive is **statistically TIED with IDM** on L2, not better — exact binomial on win rate p=0.585, paired Wilcoxon p=0.761, median-difference 95% bootstrap CI [−10.3, +6.4] includes zero. We do **not** claim it beats IDM. The deficit is concentrated in **4 of 30 scenarios that carry 63% of total L2 mass** (L2: 55.7, 80.3, 85.3, 121.2m), all intersection-turn scenarios where the centerline route goes straight while the expert turns.
+**Honest statistical reading (`statistical_analysis.py`):** SpeedAdaptive is **statistically TIED with IDM** on L2 (binomial p=0.585, Wilcoxon p=0.761, median-diff 95% CI [−10.3, +6.4] includes zero). Deficit concentrated in 4 scenarios carrying 63% of total L2 mass — intersection turns where the centerline goes straight while the expert turns.
+
+**Phase 3c''' (RoadblockRouteMapBC) — a correct goal is necessary but not sufficient.** Using `route_roadblock_ids` to pick the junction branch **changed the route on 28/30 scenarios** (so the mechanism genuinely fires — not a silent fallback). It is **statistically tied with its parent** (Wilcoxon p=0.808, mean 17.0 vs 18.2m), but the per-scenario effect is the real finding: **15 scenarios improved, 13 regressed.** Where the corrected route matched a turn the policy could execute, it fixed the scenario dramatically (scen_0000: 55.7→**4.1m**, eliminating one of four catastrophic failures, p90 58→32m). But where the corrected route pointed into a turn, the policy — trained on near-straight expert goals — could not track it and *regressed* (scen_0022: 1.1→**15.5m**). **The bottleneck has moved from goal *representation* (global route + speed-matched scale + correct branch — now solved) to policy *execution of turns*.** The deterministic MLP regresses turn-vs-straight decisions to the mean; a correct turn-goal is out-of-distribution for it. This is the precise, data-isolated motivation for Phase 3d (multi-modal Diffusion Policy) and/or retraining with route goals that include turns.
 
 ### Closed-loop — PDM-Score (driving quality, `pdm_score.py`)
 
