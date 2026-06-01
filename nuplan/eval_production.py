@@ -70,6 +70,9 @@ CKPT_SPEEDADAPTIVE = str(CKPT_DIR / 'goal_bc.pt')
 # Phase 3c''''' dual-horizon: 10-dim goal (near+far), separate trained checkpoint.
 # Produced by train_dual_horizon.py. Until trained, build_planners warn-skips it.
 CKPT_DUALHORIZON = str(CKPT_DIR / 'trained_dual_horizon.pt')
+# Phase 3d diffusion policy: DDPM denoiser with dual-horizon goal, same 10-dim conditioning.
+# Produced by train_diffusion_policy.py. Until trained, build_planners warn-skips it.
+CKPT_DIFFUSION   = str(CKPT_DIR / 'trained_diffusion_policy.pt')
 
 # GoalBCPlanner is EXCLUDED from the multi-scenario (all_scenarios) eval by default.
 #
@@ -90,8 +93,8 @@ GOALBC_ORACLE_L2: float = 1.820   # validated in goal_bc.ipynb, 3 scenarios
 _DB_FILES = sorted(DB_DIR.glob('*.db'))
 
 # L2 thresholds for the failure/good scenario counts
-L2_FAIL_THRESHOLD = 20.0   # avg L2 > 20m  → failure scenario
-L2_GOOD_THRESHOLD = 5.0    # avg L2 < 5m   → good scenario
+L2_FAIL_THRESHOLD = 20.0   # avg L2 > 20m  -> failure scenario
+L2_GOOD_THRESHOLD = 5.0    # avg L2 < 5m   -> good scenario
 
 # Planners that do NOT require expert data at inference (deployable without expert DB).
 # WHY MapBCPlanner included: uses only HD map (no expert DB) at inference.
@@ -102,6 +105,8 @@ DEPLOYABLE_PLANNERS = {
     'SpeedAdaptiveRouteMapBCPlanner',
     'RoadblockRouteMapBCPlanner',
     'DualHorizonRouteMapBCPlanner',
+    # Phase 3d: diffusion uses route goals (same as DualHorizon) — no expert DB at inference.
+    'DiffusionPolicyPlanner',
 }
 
 # ── Planner registry ──────────────────────────────────────────────────────────
@@ -123,6 +128,7 @@ def build_planners(selection: str) -> List[Tuple[str, object]]:
         SpeedAdaptiveRouteMapBCPlanner,
         RoadblockRouteMapBCPlanner,
         DualHorizonRouteMapBCPlanner,
+        DiffusionPolicyPlanner,
     )
 
     # Full ordered list: (cli_key, display_name, factory_fn)
@@ -136,6 +142,9 @@ def build_planners(selection: str) -> List[Tuple[str, object]]:
         ('speedadaptive','SpeedAdaptiveRouteMapBCPlanner', lambda: SpeedAdaptiveRouteMapBCPlanner(CKPT_SPEEDADAPTIVE)),
         ('roadblock',    'RoadblockRouteMapBCPlanner',    lambda: RoadblockRouteMapBCPlanner(CKPT_SPEEDADAPTIVE)),
         ('dualhorizon',  'DualHorizonRouteMapBCPlanner',  lambda: DualHorizonRouteMapBCPlanner(CKPT_DUALHORIZON)),
+        # Phase 3d: same 10-dim dual-horizon goal, DDPM denoiser instead of MLP.
+        # WHY 'diffusion' key (not 'phase3d'): matches the model type, not the phase label.
+        ('diffusion',    'DiffusionPolicyPlanner',        lambda: DiffusionPolicyPlanner(CKPT_DIFFUSION)),
     ]
 
     valid_keys = {r[0] for r in ALL}
@@ -164,11 +173,12 @@ def build_planners(selection: str) -> List[Tuple[str, object]]:
             'speedadaptive': CKPT_SPEEDADAPTIVE,
             'roadblock':     CKPT_SPEEDADAPTIVE,   # reuses goal_bc.pt weights
             'dualhorizon':   CKPT_DUALHORIZON,     # separate 10-dim checkpoint (train first)
+            'diffusion':     CKPT_DIFFUSION,        # Phase 3d DDPM checkpoint (train first)
         }
         if cli_key in ckpt_map and not Path(ckpt_map[cli_key]).exists():
             print(f'[WARN] Skipping {display_name} — checkpoint not found: {ckpt_map[cli_key]}')
             continue
-        if cli_key == 'goalbc' and not GOALBC_DB:
+        if cli_key == 'goalbc' and not _DB_FILES:
             print(f'[WARN] Skipping GoalBCPlanner — no DB files found in {DB_DIR}')
             continue
         try:
@@ -455,10 +465,10 @@ def print_results_table(all_results: Dict[str, Dict]) -> None:
         f"{'Planner':<38} {'N':>4} {'Mean':>7} {'Std':>7} {'Median':>7}"
         f" {'p10':>7} {'p90':>7} {'Max':>7} {'Fail>20m':>9} {'Good<5m':>8}"
     )
-    sep = '─' * len(header)
+    sep = '-' * len(header)
     print()
     print('=' * len(header))
-    print('PRODUCTION EVAL — ALL PLANNERS (sorted by mean avg-L2)')
+    print('PRODUCTION EVAL -- ALL PLANNERS (sorted by mean avg-L2)')
     print('=' * len(header))
     print(header)
     print(sep)
@@ -507,7 +517,7 @@ def print_deployability_summary(all_results: Dict[str, Dict]) -> None:
         return
 
     print(f'  Oracle reference: GoalBCPlanner = {oracle_l2:.3f} m')
-    print(f'  (3-scenario single-log eval, goal_bc.ipynb — not re-run here to avoid')
+    print(f'  (3-scenario single-log eval, goal_bc.ipynb -- not re-run here to avoid')
     print(f'   per-scenario DB mismatch. See eval_speed_adaptive.py for single-log eval.)')
     print()
     print('  Deployable (no expert data at inference):')
@@ -534,11 +544,11 @@ def print_deployability_summary(all_results: Dict[str, Dict]) -> None:
         # Guard against zero oracle (degenerate case)
         pct = (best_l2 - oracle_l2) / oracle_l2 * 100.0 if oracle_l2 > 0 else float('nan')
         print()
-        print(f'  Best deployable:   {best_deploy}  →  {best_l2:.3f} m')
+        print(f'  Best deployable:   {best_deploy}  ->  {best_l2:.3f} m')
         print(f'  Oracle (GoalBC):   {oracle_l2:.3f} m')
         print(f'  L2 gap:            {best_l2 - oracle_l2:+.3f} m  ({pct:+.1f}%)')
         if pct < 20.0:
-            print('  CLAIM: deployable planner ≈ oracle (< 20% relative gap). Suitable for deployment.')
+            print('  CLAIM: deployable planner approx oracle (< 20% relative gap). Suitable for deployment.')
         elif pct < 100.0:
             print('  PARTIAL: deployable planner trails oracle but shows strong improvement over BC baseline.')
         else:
@@ -585,7 +595,7 @@ def save_results_json(all_results: Dict[str, Dict], n_scenarios_requested: int) 
     with open(out_path, 'w') as f:
         json.dump(payload, f, indent=2)
 
-    print(f'  Results saved → {out_path}')
+    print(f'  Results saved -> {out_path}')
     return out_path
 
 
@@ -603,8 +613,8 @@ def parse_args():
         '--planners', type=str, default='all',
         help=(
             'Which planners to run. '
-            '"all" (default) runs all five. '
-            'Comma-separated subset: bc,idm,goalbc,routebc,speedadaptive'
+            '"all" (default) runs all planners. '
+            'Comma-separated subset: bc,idm,goalbc,routebc,speedadaptive,dualhorizon,diffusion'
         ),
     )
     return parser.parse_args()
@@ -619,7 +629,7 @@ def main():
 
     print()
     print('╔══════════════════════════════════════════════════════╗')
-    print('║      AV IMITATION LEARNING — PRODUCTION EVAL         ║')
+    print('║      AV IMITATION LEARNING -- PRODUCTION EVAL        ║')
     print('╚══════════════════════════════════════════════════════╝')
     print(f'  Scenarios requested : {n_scenarios}')
     print(f'  Scenario filter     : all_scenarios (all 64 mini DB files, shuffled)')
@@ -639,7 +649,7 @@ def main():
     print(f'  Will evaluate {len(planners)} planner(s):')
     for name, _ in planners:
         deploy_tag = ' [deployable]' if name in DEPLOYABLE_PLANNERS else ' [needs expert DB]'
-        print(f'    • {name}{deploy_tag}')
+        print(f'    - {name}{deploy_tag}')
     print()
 
     # ── Run simulations ────────────────────────────────────────────────────────
