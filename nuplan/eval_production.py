@@ -67,6 +67,9 @@ CKPT_GOALBC      = str(CKPT_DIR / 'goal_bc.pt')
 # only inference goal SOURCE differs (route vs expert DB).
 CKPT_ROUTEMAPBC  = str(CKPT_DIR / 'goal_bc.pt')
 CKPT_SPEEDADAPTIVE = str(CKPT_DIR / 'goal_bc.pt')
+# Phase 3c''''' dual-horizon: 10-dim goal (near+far), separate trained checkpoint.
+# Produced by train_dual_horizon.py. Until trained, build_planners warn-skips it.
+CKPT_DUALHORIZON = str(CKPT_DIR / 'trained_dual_horizon.pt')
 
 # GoalBCPlanner is EXCLUDED from the multi-scenario (all_scenarios) eval by default.
 #
@@ -98,6 +101,7 @@ DEPLOYABLE_PLANNERS = {
     'RouteMapBCPlanner',
     'SpeedAdaptiveRouteMapBCPlanner',
     'RoadblockRouteMapBCPlanner',
+    'DualHorizonRouteMapBCPlanner',
 }
 
 # ── Planner registry ──────────────────────────────────────────────────────────
@@ -118,6 +122,7 @@ def build_planners(selection: str) -> List[Tuple[str, object]]:
         RouteMapBCPlanner,
         SpeedAdaptiveRouteMapBCPlanner,
         RoadblockRouteMapBCPlanner,
+        DualHorizonRouteMapBCPlanner,
     )
 
     # Full ordered list: (cli_key, display_name, factory_fn)
@@ -130,6 +135,7 @@ def build_planners(selection: str) -> List[Tuple[str, object]]:
         ('routebc',      'RouteMapBCPlanner',             lambda: RouteMapBCPlanner(CKPT_ROUTEMAPBC)),
         ('speedadaptive','SpeedAdaptiveRouteMapBCPlanner', lambda: SpeedAdaptiveRouteMapBCPlanner(CKPT_SPEEDADAPTIVE)),
         ('roadblock',    'RoadblockRouteMapBCPlanner',    lambda: RoadblockRouteMapBCPlanner(CKPT_SPEEDADAPTIVE)),
+        ('dualhorizon',  'DualHorizonRouteMapBCPlanner',  lambda: DualHorizonRouteMapBCPlanner(CKPT_DUALHORIZON)),
     ]
 
     valid_keys = {r[0] for r in ALL}
@@ -157,6 +163,7 @@ def build_planners(selection: str) -> List[Tuple[str, object]]:
             'routebc':       CKPT_ROUTEMAPBC,
             'speedadaptive': CKPT_SPEEDADAPTIVE,
             'roadblock':     CKPT_SPEEDADAPTIVE,   # reuses goal_bc.pt weights
+            'dualhorizon':   CKPT_DUALHORIZON,     # separate 10-dim checkpoint (train first)
         }
         if cli_key in ckpt_map and not Path(ckpt_map[cli_key]).exists():
             print(f'[WARN] Skipping {display_name} — checkpoint not found: {ckpt_map[cli_key]}')

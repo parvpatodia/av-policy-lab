@@ -373,3 +373,70 @@ def test_select_successor_empty_ids_matches_parent(roadblock_planner):
     turn     = _FakeLane((0.3, 1.0), roadblock_id="y")
     chosen = roadblock_planner._select_successor([straight, turn], np.array([1.0, 0.0]))
     assert chosen is straight
+
+
+# ===========================================================================
+# Group 8: DualHorizonRouteMapBCPlanner (Phase 3c''''' — near + far goal)
+# ===========================================================================
+
+@pytest.fixture
+def fake_ckpt_10(tmp_path, planners_mod):
+    """A minimal valid 10-dim dual-horizon checkpoint so the real constructor runs.
+    Mirrors trained_dual_horizon.pt: model=GoalBCPolicy(in_dim=10), X stats shape (10,)."""
+    ckpt_path = tmp_path / "fake_dual_horizon.pt"
+    model = planners_mod.GoalBCPolicy(in_dim=10)
+    ckpt = {
+        "model": model.state_dict(),
+        "X_mean": np.zeros(10, dtype=np.float32),
+        "X_std":  np.ones(10, dtype=np.float32),
+        "Y_mean": np.zeros(48, dtype=np.float32),
+        "Y_std":  np.ones(48, dtype=np.float32),
+    }
+    torch.save(ckpt, str(ckpt_path))
+    return str(ckpt_path)
+
+
+@pytest.fixture
+def dual_planner(planners_mod, fake_ckpt_10):
+    return planners_mod.DualHorizonRouteMapBCPlanner(fake_ckpt_10)
+
+
+def test_goalbc_policy_indim_default_backcompat(planners_mod):
+    """GoalBCPolicy() must still build the 8-dim net (existing goal_bc.pt loads unchanged)."""
+    net = planners_mod.GoalBCPolicy()
+    assert net.net[0].in_features == 8
+
+
+def test_goalbc_policy_indim_10(planners_mod):
+    """GoalBCPolicy(in_dim=10) builds a 10-input net and forwards to 48 outputs."""
+    net = planners_mod.GoalBCPolicy(in_dim=10)
+    assert net.net[0].in_features == 10
+    out = net(torch.zeros(1, 10))
+    assert out.shape == (1, 48)
+
+
+def test_dual_planner_builds_and_flags(dual_planner, planners_mod):
+    """Dual-horizon planner loads the 10-dim ckpt, is speed-adaptive, names itself."""
+    assert dual_planner.name() == "DualHorizonRouteMapBCPlanner"
+    assert dual_planner._speed_adaptive is True
+    assert dual_planner._far_m == planners_mod._FAR_LOOKAHEAD_M  # 20m default
+    assert dual_planner._X_mean.shape[0] == 10
+
+
+def test_dual_planner_near_far_differ_on_curve(dual_planner):
+    """The whole point: on a curving route, the far goal deflects more than the near goal.
+
+    Route goes +x for 5m then curves up (+y). Near look-ahead (small) stays near-straight;
+    far look-ahead (20m) reaches into the curve, so |angle_far| > |angle_near|."""
+    # straight 0..5m then a quarter-ish arc bending +y
+    pts = [[float(i), 0.0] for i in range(6)]
+    for k in range(1, 40):
+        ang = (np.pi / 2) * (k / 40.0)
+        pts.append([5.0 + 5.0 * np.sin(ang), 5.0 * (1 - np.cos(ang))])
+    dual_planner._route_pts = np.array(pts, dtype=np.float64)
+
+    near = dual_planner._get_route_goal(0.0, 0.0, 0.0, look_ahead_m=2.0)
+    far  = dual_planner._get_route_goal(0.0, 0.0, 0.0, look_ahead_m=20.0)
+    ang_near = abs(np.degrees(np.arctan2(near[1], near[0])))
+    ang_far  = abs(np.degrees(np.arctan2(far[1], far[0])))
+    assert ang_far > ang_near + 5.0   # far reaches the bend, near does not

@@ -736,10 +736,14 @@ class GoalBCPolicy(nn.Module):
     to anticipate upcoming curves without leaking far-future expert trajectory.
     """
 
-    def __init__(self):
+    def __init__(self, in_dim: int = 8):
+        # WHY in_dim param (default 8, backward compatible): the dual-horizon variant
+        # (Phase 3c''''') feeds 10 features [state(6) + near_goal(2) + far_goal(2)].
+        # Existing checkpoints (goal_bc.pt) load unchanged because GoalBCPolicy() still
+        # builds the 8-dim network; state_dict shapes are unaffected by the new kwarg.
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(8, 256), nn.ReLU(),
+            nn.Linear(in_dim, 256), nn.ReLU(),
             nn.Linear(256, 256), nn.ReLU(),
             nn.Linear(256, 256), nn.ReLU(),
             nn.Linear(256, 48),
@@ -1605,3 +1609,105 @@ class RoadblockRouteMapBCPlanner(SpeedAdaptiveRouteMapBCPlanner):
         except Exception:
             pass
         return False
+
+
+# Far-preview look-ahead for the dual-horizon planner. Chosen from the goal-angle
+# vs look-ahead analysis (notes/phase3_roadmap.md, Phase 3c'''''): at 20m, ~80% of
+# turning windows show a goal deflection >15deg, i.e. the turn is visible in the goal.
+# At the 3.5m near-horizon used by SpeedAdaptive, only ~6% are — turns are invisible.
+_FAR_LOOKAHEAD_M: float = 20.0
+
+
+class DualHorizonRouteMapBCPlanner(RouteMapBCPlanner):
+    """
+    Phase 3c''''' — dual-horizon goal: near (tracking) + far (turn anticipation).
+
+    WHY (data-grounded, from Phase 3c''' + the look-ahead analysis):
+      A single goal at the speed-adaptive near horizon (speed * 0.8 s ~= 3.5 m) is
+      near-straight even approaching a junction — at 3.5 m only ~6% of turning windows
+      show the turn. The turn only becomes visible in a single goal point at 16-24 m.
+      So neither SpeedAdaptive nor Roadblock could SEE turns coming: the information was
+      absent from the input, not mis-executed. A multi-modal head alone (Diffusion) would
+      not fix this — it cannot commit to a turn it was never told about.
+
+    THE FIX — give the policy BOTH horizons, exactly like a real reference-path controller:
+      near goal = speed * 0.8 s arc-length  (precise local tracking — what already works)
+      far  goal = fixed 20 m arc-length      (turn anticipation — the missing information)
+    Input becomes 10-dim: [sin,cos,vx,vy,ax,ay, dx_near,dy_near, dx_far,dy_far].
+
+    This is the cleanest ablation of the Phase 3c''' finding: identical to SpeedAdaptive
+    except for the two ADDED far-goal features (near goal held fixed). If turn execution
+    improves, the bottleneck was input information (deployable fix). If not, the
+    deterministic MLP genuinely cannot represent junction bimodality -> Phase 3d (Diffusion).
+
+    Requires a checkpoint trained with the matching 10-dim dual-horizon goal
+    (train_dual_horizon.py -> trained_dual_horizon.pt). Inference route source is the HD
+    map (no expert data), so this remains deployable.
+    """
+
+    def __init__(self, checkpoint_path: str, far_m: float = _FAR_LOOKAHEAD_M) -> None:
+        # Speed-adaptive near goal (reuse parent machinery); far goal at fixed far_m.
+        self._look_ahead_m   = 8.0           # unused directly (near is speed-adaptive)
+        self._speed_adaptive = True
+        self._far_m          = far_m
+        self._route_pts: Optional[np.ndarray] = None
+        self._map_api = None
+
+        ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+        # WHY in_dim=10: dual-horizon input. state_dict shapes match the trained net.
+        self._model = GoalBCPolicy(in_dim=10).to('cpu')
+        self._model.load_state_dict(ckpt['model'])
+        self._model.eval()
+        self._X_mean = torch.tensor(ckpt['X_mean'], dtype=torch.float32)
+        self._X_std  = torch.tensor(ckpt['X_std'],  dtype=torch.float32)
+        self._Y_mean = ckpt['Y_mean']
+        self._Y_std  = ckpt['Y_std']
+
+    def name(self) -> str:
+        return 'DualHorizonRouteMapBCPlanner'
+
+    def compute_planner_trajectory(self, current_input: PlannerInput) -> InterpolatedTrajectory:
+        ego = current_input.history.current_state[0]
+        x_g = ego.rear_axle.x
+        y_g = ego.rear_axle.y
+        yaw = ego.rear_axle.heading
+        dcs = ego.dynamic_car_state
+        vx  = dcs.rear_axle_velocity_2d.x
+        vy  = dcs.rear_axle_velocity_2d.y
+        ax  = dcs.rear_axle_acceleration_2d.x
+        ay  = dcs.rear_axle_acceleration_2d.y
+        t0  = ego.time_point.time_us
+
+        if self._route_pts is None:
+            self._route_pts = self._build_route(ego, self._map_api)
+
+        # Near goal: speed-adaptive (matches SpeedAdaptive exactly). Far goal: fixed 20 m.
+        speed     = float(np.sqrt(vx ** 2 + vy ** 2))
+        near_la   = max(0.05, speed * _GOAL_LOOKAHEAD_S)
+        dxn, dyn  = self._get_route_goal(x_g, y_g, yaw, near_la)
+        dxf, dyf  = self._get_route_goal(x_g, y_g, yaw, self._far_m)
+
+        feat = torch.tensor(
+            [np.sin(yaw), np.cos(yaw), vx, vy, ax, ay, dxn, dyn, dxf, dyf],
+            dtype=torch.float32,
+        )
+        feat_norm = (feat - self._X_mean) / self._X_std
+        with torch.no_grad():
+            pred_norm = self._model(feat_norm.unsqueeze(0)).squeeze(0).numpy()
+        pred = (pred_norm * self._Y_std + self._Y_mean).reshape(FUTURE_STEPS, 3)
+
+        cos_h, sin_h = np.cos(yaw), np.sin(yaw)
+        states = [ego]
+        for j, (dx_e, dy_e, d_yaw) in enumerate(pred):
+            wx    = x_g + cos_h * dx_e - sin_h * dy_e
+            wy    = y_g + sin_h * dx_e + cos_h * dy_e
+            w_yaw = yaw + d_yaw
+            states.append(EgoState.build_from_rear_axle(
+                rear_axle_pose=StateSE2(wx, wy, w_yaw),
+                rear_axle_velocity_2d=StateVector2D(vx, vy),
+                rear_axle_acceleration_2d=StateVector2D(ax, ay),
+                tire_steering_angle=0.0,
+                time_point=TimePoint(t0 + int((j + 1) * DT * 1e6)),
+                vehicle_parameters=ego.car_footprint.vehicle_parameters,
+            ))
+        return InterpolatedTrajectory(states)

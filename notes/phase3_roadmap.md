@@ -149,12 +149,53 @@ policy actually sees turn-goals during training).
 
 ---
 
-## Phase 3d — Diffusion Policy Planner
+## Phase 3c''''' — DualHorizonRouteMapBC (the look-ahead-horizon finding)
 
-**Motivation (now empirically grounded by 3c'''):** Deterministic MLP regression underfits the
-multi-modal trajectory distribution at junctions (turn vs. straight). 3c''' proved a *correct*
-turn-goal is not enough — the MLP cannot commit to the turn. DDPM denoising handles multi-modality
-natively and can represent the turn/straight bimodality the MLP averages away.
+**The discovery that redirected the project.** Before building 3d, a controlled experiment
+(retrain with speed-adaptive route goals) was proposed. Its *rigor gate* — a goal-angle analysis
+run before any training — overturned the plan and saved a misdirected Diffusion build.
+
+**Goal-angle vs look-ahead horizon** (expert paths, 20 DBs, turning windows = heading changes
+>20° over next 20m, 15% of all windows):
+
+| look-ahead | % of turning windows where the turn is visible (goal >15°) |
+|---|---|
+| 2 m | 3% |
+| 4 m | 7% |
+| **3.5 m (what SpeedAdaptive/Roadblock use)** | **~6%** |
+| 8 m | 24% |
+| 16 m | 64% |
+| 24 m | 88% |
+
+**At the 3.5 m horizon the planners actually use, the turn is invisible in 94% of turning
+windows.** It only enters a single goal point at 16–24 m. So SpeedAdaptive and Roadblock did not
+*mis-execute* turns — the turn was never in their input. **Corollary: Diffusion Policy alone would
+NOT fix this** — a multi-modal head cannot commit to a turn it was never told about. This is an
+input-information problem first, a policy-capacity problem only after.
+
+**The fix — dual-horizon goal (like a real reference-path controller):**
+- near goal = speed × 0.8 s arc-length (≈3.5 m) — precise local tracking (what already works)
+- far  goal = fixed 20 m arc-length — turn anticipation (the missing information)
+- 10-dim input; identical architecture/optimizer/targets; near goal held fixed → clean ablation
+  that ADDS the far preview. `DualHorizonRouteMapBCPlanner` (inference) + `train_dual_horizon.py`.
+
+**Rigor gate PASSED:** on turning windows the 20 m far goal exposes the turn 81% of the time vs
+8% for the near goal (10× more). The dual-horizon input genuinely carries the missing turn info.
+
+**Status:** scaffolded + unit-tested (55/55), registered in eval_production (`--planners dualhorizon`),
+warn-skips until trained. Run `train_dual_horizon.py` (~20 min) → eval. **This is the decisive test:**
+if turn execution improves, the bottleneck was input information (deployable fix, MLP sufficient);
+if not, the MLP cannot represent junction bimodality even when informed → Phase 3d justified.
+
+---
+
+## Phase 3d — Diffusion Policy Planner (only if 3c''''' shows the MLP is the limit)
+
+**Motivation, now correctly scoped:** 3c''' showed a correct turn-goal is necessary; the look-ahead
+analysis showed the turn must first be *present in the input* (3c''''' supplies it via the far goal).
+Diffusion Policy is warranted ONLY if, with the turn information present (dual-horizon), the
+deterministic MLP still cannot execute it — i.e. if the residual is genuine turn/straight
+multi-modality that a unimodal regressor averages away. DDPM denoising handles that natively.
 
 **Conditioning:** route_goal(2) + state(6) = 8-dim condition (same as GoalBC/MapBC, reusable)  
 **Score network:** small transformer denoiser, T=100 DDPM steps, DDIM sampling at 10 steps  
