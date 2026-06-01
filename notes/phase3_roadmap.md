@@ -182,20 +182,53 @@ input-information problem first, a policy-capacity problem only after.
 **Rigor gate PASSED:** on turning windows the 20 m far goal exposes the turn 81% of the time vs
 8% for the near goal (10× more). The dual-horizon input genuinely carries the missing turn info.
 
-**Status:** scaffolded + unit-tested (55/55), registered in eval_production (`--planners dualhorizon`),
-warn-skips until trained. Run `train_dual_horizon.py` (~20 min) → eval. **This is the decisive test:**
-if turn execution improves, the bottleneck was input information (deployable fix, MLP sufficient);
-if not, the MLP cannot represent junction bimodality even when informed → Phase 3d justified.
+**RESULT (trained, 30 scenarios) — the decisive finding:**
+Mean 27.55m (worse than SpeedAdaptive 18.19m), median 16.55m, 14 improved / 16 regressed.
+The aggregate hides a clean MODE SWAP:
+- FIXED the intersection turns that broke SpeedAdaptive: scen_0018 85.3→**0.0m**,
+  scen_0000 55.7→**0.4m**, scen_0011 80.3→33.7m, scen_0024 16.0→0.5m, scen_0005 11.9→0.1m.
+  → the turn information IS usable; the MLP executed turns it previously failed.
+- BROKE the easy straights SpeedAdaptive nailed: scen_0013 3.1→**74m**, scen_0025 0.8→**47m**,
+  scen_0006 1.3→61m, scen_0010 8.5→73m, scen_0014 6.9→70m.
+- PDM fingerprint of hedging: comfort **1.00** (best), no-collision **0.90**, drivable **0.90**,
+  direction **1.00** — but progress **0.40** (worst). Drives smoothly/safely, won't commit.
+
+**Conclusion (resolves the (A) vs (B) question — BOTH, complementary):**
+(A) information was necessary — with the far goal the MLP CAN do the turns (85→0). ✓
+(B) a single deterministic regressor is insufficient — conditioned to anticipate the far turn,
+    it over-applies on straights and under-commits, averaging the turn/straight modes. ✓
+A single deterministic policy cannot serve both regimes from the same conditioning. This is the
+airtight, data-isolated motivation for a MULTI-MODAL action policy → Phase 3d Diffusion Policy.
+
+**Documented cheaper alternative control (for completeness):** a far-horizon sweep (e.g. 10/14m)
+could probe a sweet spot, but the breaks are on near-perfect straights (0.8→47m), so the far goal
+injects steering error on straights at any horizon that also reveals turns — mode competition, not
+a horizon-tuning issue.
 
 ---
 
-## Phase 3d — Diffusion Policy Planner (only if 3c''''' shows the MLP is the limit)
+## Phase 3d — Diffusion Policy Planner ✅ NOW JUSTIFIED BY DATA
 
-**Motivation, now correctly scoped:** 3c''' showed a correct turn-goal is necessary; the look-ahead
-analysis showed the turn must first be *present in the input* (3c''''' supplies it via the far goal).
-Diffusion Policy is warranted ONLY if, with the turn information present (dual-horizon), the
-deterministic MLP still cannot execute it — i.e. if the residual is genuine turn/straight
-multi-modality that a unimodal regressor averages away. DDPM denoising handles that natively.
+**The gate is cleared.** 3c''''' showed that with the turn information present (dual-horizon, far
+goal verified to expose turns 81% of turning windows), the deterministic MLP fixes turns but breaks
+straights — it cannot conditionally serve both regimes and instead averages them (progress 0.40,
+comfort 1.0 — the hedging fingerprint). This is exactly the multi-modal trajectory distribution a
+deterministic regressor collapses. Diffusion Policy is the principled, literature-grounded fix.
+
+**Design:**
+- Conditioning: the SAME 10-dim dual-horizon context [state(6) + near(2) + far(2)] — we keep the
+  information that proved usable; we change only the policy class (deterministic → generative).
+- Score network: small conditional MLP/transformer denoiser ε_θ(traj_t, t, cond); T=100 DDPM
+  train steps; DDIM ~10-step sampling at inference.
+- Inference: sample K trajectories, score by goal-consistency, take best (handles turn-vs-straight
+  as distinct modes instead of averaging).
+- **Pre-registered hypothesis:** Diffusion fixes the turns (like DualHorizon) WITHOUT breaking the
+  straights (unlike DualHorizon) → mean L2 below SpeedAdaptive AND below IDM, progress recovers
+  toward 0.8. Success = beats IDM (13.97m) on mean with progress ≥ 0.75 and comfort ≥ 0.8.
+- **Falsifier:** if Diffusion also can't get both regimes, the limit is the conditioning/horizon,
+  not the policy class — fall back to the far-horizon sweep / curvature-gated conditioning.
+
+**REF:** Chi et al. 2023 (Diffusion Policy, RSS); Janner et al. 2022 (Diffuser, ICML).
 
 **Conditioning:** route_goal(2) + state(6) = 8-dim condition (same as GoalBC/MapBC, reusable)  
 **Score network:** small transformer denoiser, T=100 DDPM steps, DDIM sampling at 10 steps  

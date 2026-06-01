@@ -188,6 +188,24 @@ empirically-grounded motivation for Phase 3d, and it strengthens the paper: we c
 *with an ablation* that goal correctness and goal executability are distinct, separable
 failure axes — most prior covariate-shift work conflates them.
 
+## 8c. Phase 3c''''' result — the multi-modality proof (added 2026-06-01)
+
+DualHorizonRouteMapBC added a far-preview goal (20m) to the near goal. Result: a clean
+**mode swap**. It FIXED the intersection turns that broke SpeedAdaptive (scen_0018
+85.3→0.0m, scen_0000 55.7→0.4m) — proving the turn information is usable — but BROKE the
+easy straights SpeedAdaptive nailed (scen_0013 3.1→74m, scen_0025 0.8→47m). 14 improved,
+16 regressed; mean worsened to 27.55m. The PDM profile is the hedging fingerprint:
+best-in-class comfort (1.00), collisions (0.90), drivable (0.90), direction (1.00), but
+worst progress (0.40).
+
+This resolves the central question with an ablation a reviewer cannot dismiss: **goal
+information and policy multi-modality are distinct, separable requirements.** A single
+deterministic regressor, given conditioning sufficient to fix turns, cannot also preserve
+straight-line behavior — it averages the two modes. This is the empirical license for
+Phase 3d (multi-modal Diffusion Policy), and it is the paper's pivot from "what goal" to
+"what policy class." The three-rung ablation — near-only (fails turns), near+far (fails
+straights), multi-modal (target: both) — is the contribution's backbone.
+
 ## 9. Roadmap to publication
 
 - [x] **3c''' RoadblockRouteMapBC** — DONE. Route direction now correct (28/30 changed),

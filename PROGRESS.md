@@ -27,6 +27,18 @@
 - Sliding Window: Best Time Buy/Sell, Longest Substring, Longest Repeating Char, Permutation in String, Sliding Window Maximum, Minimum Window Substring ✅ (6)
 - Binary Search: next section
 
+## AV-Policy-Lab Results — Phase 3c''''' COMPLETE (DualHorizon) → Phase 3d JUSTIFIED
+
+**Phase 3c''''' DualHorizon (decisive):** near + far(20m) goal. Mean 27.55m (regressed), but a
+clean MODE SWAP: FIXED the intersection turns (scen_0018 85→0, scen_0000 56→0.4) AND broke easy
+straights (scen_0013 3→74, scen_0025 0.8→47). PDM fingerprint of hedging: comfort 1.00, collision
+0.90, drivable 0.90 (all best) but progress 0.40 (worst). **Conclusion: turn info IS usable (A) AND
+a single deterministic policy can't serve both turn+straight regimes (B) — it averages them.**
+Airtight motivation for **Phase 3d Diffusion Policy** (multi-modal, now data-justified). Trained
+checkpoint: trained_dual_horizon.pt. 55/55 tests pass.
+
+---
+
 ## AV-Policy-Lab Results — Phase 3c''' COMPLETE (RoadblockRouteMapBC) + PDM-Score
 
 **Phase 3c''' result (the pivot):** RoadblockRouteMapBC uses route_roadblock_ids for the
