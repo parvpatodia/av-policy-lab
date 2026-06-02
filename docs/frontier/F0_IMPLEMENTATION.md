@@ -34,6 +34,18 @@ All positions are ego-frame metres / 120; velocities / 15; accel / 5; headings a
 - Agent channels are `type-onehot` here; STAGE_2 also lists length/width + a learned
   type embedding. F0 keeps the onehot; the embedding is a Stage-3 (model) concern.
 
+## Data layout (as actually staged)
+
+Data was transferred mirroring the local layout, with these env vars exported in
+`~/.bashrc` on Explorer:
+- `NUPLAN_DATA_ROOT=/scratch/$USER/nuplan/data/cache`  (PARENT of split subdirs)
+- `NUPLAN_MAPS_ROOT=/scratch/$USER/nuplan/maps`
+- `NUPLAN_EXP_ROOT=/scratch/$USER/nuplan/exp`
+
+So the MINI DBs live at `$NUPLAN_DATA_ROOT/mini` and maps at `$NUPLAN_MAPS_ROOT`.
+The commands below reference those env vars (no hardcoded usernames or the
+standard `dataset/nuplan-v1.1/splits/...` layout, which is NOT how this is staged).
+
 ## Run commands
 
 ### 0. Unit tests (no devkit, seconds) — run first
@@ -45,14 +57,16 @@ python -m pytest tests/test_scene_features.py -q
 ### 1. Smoke on MINI (the gate) — see nuplan/slurm/VALIDATE_SMOKE.md
 ```bash
 python -u nuplan/features/scene_features.py --smoke --n-scenarios 5 \
-    --data-root /scratch/$USER/nuplan/dataset/nuplan-v1.1/splits/mini \
-    --map-root  /scratch/$USER/nuplan/dataset/maps
+    --data-root "$NUPLAN_DATA_ROOT/mini" \
+    --map-root  "$NUPLAN_MAPS_ROOT"
 ```
 
 ### 2. Full extraction (CPU, partition=short, 48h, no GPU)
 ```bash
-sbatch nuplan/slurm/extract_features.sbatch                 # full split
+sbatch nuplan/slurm/extract_features.sbatch                 # mini split (DATA_SPLIT=mini default)
 LIMIT=2000 sbatch nuplan/slurm/extract_features.sbatch      # costed pilot first (recommended)
+# once the full split is downloaded:
+DATA_SPLIT=trainval sbatch nuplan/slurm/extract_features.sbatch
 ```
 
 ## devkit-call ledger (what to confirm in-env)
@@ -128,11 +142,13 @@ If smoke is green, the full 48h run will not fail on API shape — only on scale
   frames** from the full split → at a few hundred samples/min this is **many hours to
   a couple of days** of wall-clock single-process. This is precisely why the job uses
   `partition=short` with the full **48h** window and shards incrementally (resumable).
+  NOTE: the MINI split (64 logs) yields far fewer frames — fine for the full pipeline
+  dry-run and F1 bring-up; download trainval (`DATA_SPLIT=trainval`) for the ~1M-frame run.
 - **Shard size:** one sample's dense tensors are ≈
   `ego 20·8 + agents 32·20·9 + map 128·20·7 + route 40·4 + crosswalks 16·20·2` ≈ **24k
   floats ≈ ~100 KB float32** (plus masks/ints). At 8 scenarios/shard × ~130
   samples/scenario ≈ ~1000 samples ≈ **~100 MB per shard** (very rough). 1M frames ≈
-  **~100 GB total** — fits `/scratch` (per-user 20 TB) but **not `/home`** (75 GB).
+  **~100 GB total** — fits `/scratch` but **not `/home`** (75 GB).
 - **Scale up honestly:** parallelize across logs with a SLURM `--array` (sketched in
   the sbatch) rather than one giant process; raise `--stride` to thin temporally
   (e.g. `stride=5` → 2 Hz sampling, 5× fewer frames) if 1M frames is more than needed.
