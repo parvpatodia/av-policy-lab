@@ -16,15 +16,16 @@
 | Physical book | Get + start | Got "The Alignment Problem" | ✅ Done |
 
 ## All-time Counts
-- NeetCode: 19/150
+- NeetCode: **23/150**
 - Applications submitted: 13
 - Cold emails sent: 6 (follow-ups due May 27-28)
-- Karpathy: L1 ✅ L2 ✅ L3 ✅ L4 ✅ L5 ⬜ L6 ⬜ L7 ⬜
+- Karpathy: L1 ✅ L2 ✅ L3 ✅ L4 ✅ L5 ✅ L6 ⬜ L7 ⬜
 
 ## NeetCode Log
 - Arrays & Hashing: Contains Duplicate, Valid Anagram, Two Sum, Group Anagrams, Top K Frequent, Encode & Decode, Product Except Self ✅ (7)
 - Two Pointers: Valid Palindrome, Two Sum II, 3Sum, Container With Most Water ✅ (4)
 - Sliding Window: Best Time Buy/Sell, Longest Substring, Longest Repeating Char, Permutation in String, Sliding Window Maximum, Minimum Window Substring ✅ (6)
+- Stack: Daily Temperatures ✅, Evaluate Reverse Polish Notation ✅, Largest Rectangle In Histogram ✅, Car Fleet ✅ (4)
 - Binary Search: next section
 
 ## AV-Policy-Lab Results — Phase 3c''''' COMPLETE (DualHorizon) → Phase 3d JUSTIFIED
