@@ -1,0 +1,19 @@
+# ERROR LEDGER
+
+> Every flaw found by the reviewer panel (Stage 6), and its fix. Checked before each stage so the same mistake is never repeated.
+
+| # | Stage | Flaw found | Severity | Fix | Pass found / fixed |
+|---|---|---|---|---|---|
+| E1 | 2 | Route-region goal was asserted but had **no construction algorithm** — "coarse route polyline" is hand-wavy and not reproducible. | High | Added explicit construction from nuPlan `route_roadblock_ids` → lane-graph successors → resampled centerline; defined what makes it multimodal at junctions. | P1 / P1 |
+| E2 | 2 | Perturbation **correction target** under-specified: an offset ego at t=0 with an unchanged expert future creates a kinematically inconsistent history→future seam. | High | Specified: perturb ego pose, re-fit a **kinematically feasible smooth history** to the perturbed t=0, keep the **original expert future** as target (nuPlan-established); never re-solve the future. | P1 / P1 |
+| E3 | 2 | Map/agent tensors are in the ego frame at t=0 — under perturbation the **scene must be re-expressed in the perturbed frame**, else inputs and supervision disagree. | Med | Added: recompute all ego-frame inputs in the perturbed frame; re-normalize after. | P1 / P1 |
+| E4 | 3 | Horizon left undecided ("16 OR 80 waypoints, decide in Stage 3") — Stage 3 did not actually decide. | Med | **Decided: H=16 waypoints @ 2 Hz over 8 s** for the diffusion target; trajectory upsampled to 10 Hz by the tracker at execution. Justified on decoder cost + nuPlan tracker. | P1 / P1 |
+| E5 | 3 | No mechanism to prevent **diffusion mode collapse / lack of diversity** beyond "K candidates" — sampling alone can still produce K near-identical trajectories. | Med | Added: anchor the K candidates on the **route-goal lane set** (one seed per candidate goal lane) so candidates are diverse *by construction*, plus standard diversity via stochastic sampling. | P1 / P1 |
+| E6 | 4 | **Collision loss vs logged agent positions is non-causal** in open-loop training: it penalizes the ego for the agents' *actual* future, which itself depended on the (counterfactual) ego — encourages the policy to avoid where agents went, not collide. | High | Reframed: collision aux loss uses agents' **observed/constant-velocity-rolled** boxes as soft penalties only (PLUTO-style, low weight), with the **closed-loop/DAgger stage** as the real interaction-safety signal. Documented the limitation explicitly. | P1 / P1 |
+| E7 | 4 | **DAgger needs an online expert**; nuPlan has logged experts only, no queryable expert at off-distribution states. The repo's "DAgger v2" likely used a heuristic relabel. | High | Clarified: use **nearest-expert / PDM-Closed as the relabeling oracle** at drifted states (well-established nuPlan substitute), and be explicit that this is approximate-DAgger, not classic DAgger. | P1 / P1 |
+| E8 | 5 | nuPlan **official test set is withheld**; "Test14-hard" is a community split (tuPlan-garage), not the leaderboard test. Could mislead reviewers about comparability. | Low | Stated explicitly that Val14 / Test14-hard are community-standard offline splits and results are comparable to the cited papers, not to the (closed) official leaderboard. | P1 / P1 |
+| E9 | 1 | Compute gap to Diffusion Planner not quantified — risks underestimating cost. | Low | Added explicit budget comparison (1M scenario × 500 epoch × 8 A100 vs our 1M frame × 100 epoch × ≤4 A100) and flagged the ~25–50× gap. | P1 / P1 |
+| E10 | all | Repo's strong **statistical rigor** (Wilcoxon/CIs) risked being dropped in the rewrite. | Low | Explicitly preserved + extended in Stage 5; noted as the project's differentiator. | P1 / P1 |
+
+## Pass 2 review
+No new High/Med flaws found after P1 fixes. Remaining items are honestly-flagged feasibility risks (compute, closed-loop sim time), not methodological errors — recorded in the final plan's honesty section rather than as fixable flaws. Iteration stopped at 2 passes (all stages ≥8).
