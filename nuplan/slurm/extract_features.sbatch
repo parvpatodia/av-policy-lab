@@ -12,12 +12,9 @@
 #   numpy geometry). A GPU would sit 100% idle — and RC bots email + flag idle GPU
 #   jobs (HPC_NORTHEASTERN.md §3). Extraction belongs on the CPU `short` partition.
 # WHY partition=short: it is the general-access CPU partition with the longest
-#   wall-clock the brief documents (48h). Full-nuPlan extraction is a multi-hour-to
-#   -multi-day job (see throughput honesty in docs/frontier/F0_IMPLEMENTATION.md), so
-#   we take the full 48h window and checkpoint at the shard level (resumable).
-#   NOTE: confirm the live `short` max wall-clock against rc.northeastern.edu/partitions/
-#   — RC docs list it as version-sensitive; if it is 24h on your account, split the
-#   run across two array jobs (see --array note below) rather than one 48h job.
+#   wall-clock confirmed on this account (48h via `sinfo`). Full-split extraction is
+#   a multi-hour-to-multi-day job (see throughput honesty in F0_IMPLEMENTATION.md),
+#   so we take the full 48h window and shard incrementally (resumable).
 # WHY cpus-per-task=16 + mem=64G: extraction is embarrassingly parallel across
 #   scenarios; 16 cores lets the (single-process) walk overlap SQLite I/O, and the
 #   nuPlan map cache + a shard buffer of samples fit comfortably in 64G. Tune up if
@@ -31,27 +28,39 @@ set -euo pipefail
 #   /home     — ~75 GB, backed up                              -> code (this repo)
 #   /projects — persistent per-PI                              -> move KEEPER shards here after
 #
-# WHY read AND write under /scratch: the brief specifies dataset on /scratch and
-# shards to /scratch. After the run completes, copy the shards you want to keep to
-# /projects/<group>/ (scratch is purged on the first Tuesday of the month).
+# WHY read AND write under /scratch: dataset lives on /scratch and shards go to
+# /scratch. After the run completes, copy keeper shards to /projects/<group>/
+# (scratch is purged on the first Tuesday of the month).
 
 # --- user-tunable env (override on the command line: VAR=... sbatch extract_features.sbatch) ---
-: "${NUPLAN_DATA_ROOT:=/scratch/$USER/nuplan/dataset/nuplan-v1.1/splits/trainval}"   # full split
-: "${NUPLAN_MAP_ROOT:=/scratch/$USER/nuplan/dataset/maps}"
+# WHY these defaults: they mirror the actual staged layout and respect the env vars
+# already exported in ~/.bashrc (NUPLAN_DATA_ROOT is the PARENT holding split subdirs;
+# NUPLAN_MAPS_ROOT is the maps dir). DATA_SPLIT selects which split to extract.
+: "${NUPLAN_DATA_ROOT:=/scratch/$USER/nuplan/data/cache}"   # parent dir of split subdirs
+: "${DATA_SPLIT:=mini}"                                      # 'mini' (have it) | 'trainval' (full, once downloaded)
+: "${NUPLAN_MAPS_ROOT:=/scratch/$USER/nuplan/maps}"
 : "${OUT_DIR:=/scratch/$USER/av-policy-lab/features/f0}"
 : "${SCENARIOS_PER_SHARD:=8}"
 : "${STRIDE:=1}"
-: "${LIMIT:=}"   # leave empty for the full split; set e.g. 2000 for a costed pilot
+: "${LIMIT:=}"   # leave empty for the whole split; set e.g. 2000 for a costed pilot
 : "${CONDA_ENV:=nuplan}"
 # WHY a fixed REPO_ROOT default in /home: code lives in the small backed-up space.
 : "${REPO_ROOT:=$HOME/av-policy-lab}"
 
+DATA_DIR="$NUPLAN_DATA_ROOT/$DATA_SPLIT"   # e.g. /scratch/$USER/nuplan/data/cache/mini
+
 mkdir -p "/scratch/$USER/av-policy-lab/logs" "$OUT_DIR"
 
 echo "[extract] host=$(hostname) job=$SLURM_JOB_ID cpus=$SLURM_CPUS_PER_TASK"
-echo "[extract] data_root=$NUPLAN_DATA_ROOT"
-echo "[extract] map_root=$NUPLAN_MAP_ROOT"
+echo "[extract] data_dir=$DATA_DIR  (split=$DATA_SPLIT)"
+echo "[extract] map_root=$NUPLAN_MAPS_ROOT"
 echo "[extract] out_dir=$OUT_DIR  per_shard=$SCENARIOS_PER_SHARD  stride=$STRIDE  limit=${LIMIT:-<all>}"
+
+if [[ ! -d "$DATA_DIR" ]]; then
+  echo "[extract] ERROR: data dir not found: $DATA_DIR" >&2
+  echo "          set NUPLAN_DATA_ROOT (parent) and DATA_SPLIT correctly, or stage the data." >&2
+  exit 2
+fi
 
 # ── conda env (nuPlan devkit lives here) ──
 # WHY `source ... conda.sh` then activate: `conda activate` needs the shell hook,
@@ -71,8 +80,8 @@ LIMIT_ARG=""
 if [[ -n "${LIMIT}" ]]; then LIMIT_ARG="--limit ${LIMIT}"; fi
 
 srun python -u nuplan/features/scene_features.py \
-    --data-root "$NUPLAN_DATA_ROOT" \
-    --map-root  "$NUPLAN_MAP_ROOT" \
+    --data-root "$DATA_DIR" \
+    --map-root  "$NUPLAN_MAPS_ROOT" \
     --out-dir   "$OUT_DIR" \
     --scenarios-per-shard "$SCENARIOS_PER_SHARD" \
     --stride "$STRIDE" \

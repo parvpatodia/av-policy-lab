@@ -7,11 +7,19 @@
 > (`login.explorer.northeastern.edu`).
 
 ## 0. One-time prerequisites
-- nuPlan **MINI** split on `/scratch` (small; ~a few GB):
-  `/scratch/$USER/nuplan/dataset/nuplan-v1.1/splits/mini`
-- nuPlan maps on `/scratch`: `/scratch/$USER/nuplan/dataset/maps`
-- conda env `nuplan` with the devkit installed.
+Data was staged mirroring the local layout, and the env vars below were exported in
+`~/.bashrc`. The paths the extractor needs:
+- nuPlan **MINI** DBs:  `$NUPLAN_DATA_ROOT/mini`  (= `/scratch/$USER/nuplan/data/cache/mini`)
+- nuPlan **maps**:      `$NUPLAN_MAPS_ROOT`        (= `/scratch/$USER/nuplan/maps`)
+- conda env `nuplan` with the devkit installed (see docs/frontier/F0_IMPLEMENTATION.md).
 - This repo checked out under `/home/$USER/av-policy-lab` (code lives in backed-up /home).
+
+Confirm before anything else:
+```bash
+env | grep NUPLAN                              # DATA_ROOT, MAPS_ROOT, EXP_ROOT all set?
+ls "$NUPLAN_DATA_ROOT/mini"/*.db | wc -l        # expect 64
+ls "$NUPLAN_MAPS_ROOT"                          # expect us-ma-boston/, sg-one-north/, *.gpkg
+```
 
 ## 1. Grab a SHORT interactive CPU allocation (no GPU — extraction is CPU-bound)
 
@@ -42,8 +50,8 @@ cd /home/$USER/av-policy-lab
 
 python -u nuplan/features/scene_features.py --smoke \
     --n-scenarios 5 \
-    --data-root /scratch/$USER/nuplan/dataset/nuplan-v1.1/splits/mini \
-    --map-root  /scratch/$USER/nuplan/dataset/maps
+    --data-root "$NUPLAN_DATA_ROOT/mini" \
+    --map-root  "$NUPLAN_MAPS_ROOT"
 ```
 
 ### What a PASS looks like
@@ -78,7 +86,8 @@ See `docs/frontier/F0_IMPLEMENTATION.md` for the full ledger. The usual suspects
 
 ## 5. Only after smoke + unit tests are green: submit the full run
 ```bash
-sbatch nuplan/slurm/extract_features.sbatch          # full split, /scratch -> /scratch
+# default is the MINI split you have staged (DATA_SPLIT=mini); see extract_features.sbatch
+sbatch nuplan/slurm/extract_features.sbatch          # mini split, /scratch -> /scratch
 # or a costed pilot first:
 LIMIT=2000 sbatch nuplan/slurm/extract_features.sbatch
 squeue -u $USER                                      # watch it
