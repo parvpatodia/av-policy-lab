@@ -25,7 +25,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=8:00:00        # 8 h per task; each processes ~4 logs (~90 min)
+#SBATCH --time=47:00:00        # 47 h per task; each processes ~4 logs (~90 min)
 #SBATCH --output=/scratch/%u/av-policy-lab/logs/f0-array-%A_%a.out
 #SBATCH --error=/scratch/%u/av-policy-lab/logs/f0-array-%A_%a.err
 
