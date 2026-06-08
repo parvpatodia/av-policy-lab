@@ -1085,17 +1085,26 @@ class SceneFeatureExtractor:
         out_dir.mkdir(parents=True, exist_ok=True)
         written: List[Path] = []
         buf: List[Dict[str, np.ndarray]] = []
-        shard_idx = 0
         for i, scn in enumerate(scenarios):
+            # WHY resume: derive the shard index from i (i // scenarios_per_shard)
+            # instead of a running counter, so a re-submitted job SKIPS scenarios whose
+            # shard already exists. The old running counter advanced only on flush, so a
+            # `continue` would mislabel/overwrite earlier shards. Scenario order is
+            # deterministic (sorted DBs at the CLI, ScenarioFilter shuffle=False,
+            # Sequential worker), so shard_for_i maps to the same scenarios every run.
+            shard_for_i = i // scenarios_per_shard
+            shard_path = out_dir / f"scene_shard_{shard_for_i:05d}.pt"
+            if shard_path.exists():
+                continue
             buf.extend(self.extract_scenario(scn, stride=stride))
             if (i + 1) % scenarios_per_shard == 0 and buf:
-                path = out_dir / f"scene_shard_{shard_idx:05d}.pt"
+                path = out_dir / f"scene_shard_{shard_for_i:05d}.pt"
                 self.save_shard(buf, path)
                 written.append(path)
                 logger.info("wrote %s (%d samples)", path, len(buf))
-                buf, shard_idx = [], shard_idx + 1
+                buf = []
         if buf:
-            path = out_dir / f"scene_shard_{shard_idx:05d}.pt"
+            path = out_dir / f"scene_shard_{shard_for_i:05d}.pt"
             self.save_shard(buf, path)
             written.append(path)
             logger.info("wrote %s (%d samples)", path, len(buf))
