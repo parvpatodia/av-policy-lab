@@ -41,7 +41,7 @@ echo "======================================="
 # ── Paths (hardcoded to actual staged layout) ─────────────────
 DATA_ROOT="/scratch/patodia.pa/nuplan/data/cache/mini"
 MAP_ROOT="/scratch/patodia.pa/nuplan/maps"
-OUT_DIR="/scratch/patodia.pa/av-policy-lab/features/f0"
+OUT_DIR="/scratch/patodia.pa/av-policy-lab/features/f0_balanced"
 REPO_ROOT="/home/patodia.pa/av-policy-lab"
 LOG_DIR="/scratch/patodia.pa/av-policy-lab/logs"
 
@@ -79,7 +79,9 @@ python -u nuplan/features/scene_features.py \
     --map-root   "$MAP_ROOT" \
     --out-dir    "$OUT_DIR" \
     --array-task-id   "${SLURM_ARRAY_TASK_ID}" \
-    --num-array-tasks 16
+    --num-array-tasks 16 \
+    --num-scenarios-per-type 20 \
+    --stride 5
 
 EXIT_CODE=$?
 

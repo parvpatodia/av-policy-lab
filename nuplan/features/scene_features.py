@@ -1120,6 +1120,7 @@ def _build_mini_scenarios(
     map_root: str,
     limit: int,
     log_names: Optional[List[str]] = None,
+    num_scenarios_per_type: Optional[int] = None,
 ) -> List["AbstractScenario"]:
     """Construct nuPlan scenarios from a data root (used by --smoke on MINI and the full run).
 
@@ -1157,7 +1158,7 @@ def _build_mini_scenarios(
         # which is how the SLURM array path assigns disjoint work to each task.
         log_names=log_names,
         map_names=None,
-        num_scenarios_per_type=None,
+        num_scenarios_per_type=num_scenarios_per_type,
         limit_total_scenarios=limit,
         timestamp_threshold_s=None,
         ego_displacement_minimum_m=None,
@@ -1234,6 +1235,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--scenarios-per-shard", type=int, default=8)
     parser.add_argument("--stride", type=int, default=1, help="iteration stride within a scenario")
     parser.add_argument("--limit", type=int, default=None, help="full run: cap total scenarios")
+    parser.add_argument("--num-scenarios-per-type", type=int, default=None, help="balanced sampling: max scenarios per nuPlan scenario type")
     # ── SLURM array parallelisation ─────────────────────────────────────────
     # WHY: the nuPlan map-query bottleneck makes single-job extraction take
     # ~90 h for mini on one CPU.  Splitting across N SLURM array tasks (one
@@ -1320,6 +1322,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         args.map_root,
         args.limit or 10_000_000,
         log_names=log_names,
+        num_scenarios_per_type=args.num_scenarios_per_type,
     )
     if not scenarios:
         logger.warning("No scenarios found for task %s — exiting cleanly.", args.array_task_id)
