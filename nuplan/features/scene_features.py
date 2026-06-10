@@ -69,6 +69,12 @@ class FeatureConfig:
     # T_h=21 (20 past + current); F0 uses a 20-step window. Documented divergence.
     history_steps: int = 20
 
+    # --- future target (the training label; F0 v1 shipped inputs only) ---
+    # WHY 16 @ 2 Hz over 8 s: STAGE_3 horizon decision (E4); near/far point
+    # goals (F2) and imitation supervision (F3/F4) all derive from this field.
+    future_steps: int = 16
+    future_horizon_s: float = 8.0
+
     # --- agents ---
     max_agents: int = 32             # nearest-N kept; pad/truncate to this
     agent_radius_m: float = 100.0    # consider agents within this radius of ego
@@ -984,6 +990,36 @@ class SceneFeatureExtractor:
         )
         agents, agent_mask = self._agent_builder.build(per_step_tracks, transform)
 
+        # --- ego future (training target), ego frame at t=0 ---
+        # WHY raise on short futures: extract_scenario catches per-iteration
+        # exceptions and logs a skip, so samples near scenario end are dropped
+        # instead of carrying a padded/garbage label.
+        future_states = list(
+            scenario.get_ego_future_trajectory(  # [VERIFIED abstract_scenario.py:318]
+                iteration,
+                time_horizon=cfg.future_horizon_s,
+                num_samples=cfg.future_steps,
+            )
+        )
+        if len(future_states) < cfg.future_steps:
+            raise ValueError(
+                f"incomplete future: {len(future_states)}/{cfg.future_steps} states"
+            )
+        # WHY [-future_steps:]: defensive against devkit variants that prepend
+        # the current state; the horizon endpoint is what must be preserved.
+        future_states = future_states[-cfg.future_steps :]
+        fut_xy = transform.world_to_ego(
+            np.array([[st.rear_axle.x, st.rear_axle.y] for st in future_states])
+        )
+        fut_h = (
+            np.array([st.rear_axle.heading for st in future_states])
+            - current_ego.rear_axle.heading
+        )
+        fut_h = np.arctan2(np.sin(fut_h), np.cos(fut_h))  # wrap to [-pi, pi]
+        ego_future = np.concatenate(
+            [fut_xy, fut_h[:, None]], axis=1
+        ).astype(np.float32)  # (future_steps, 3)
+
         # --- map + route + traffic lights ---
         traffic_lights = list(
             scenario.get_traffic_light_status_at_iteration(iteration)  # [VERIFIED]
@@ -1001,7 +1037,7 @@ class SceneFeatureExtractor:
             transform,
         )
 
-        sample = {"ego": ego, "agents": agents, "agent_mask": agent_mask, **map_feats}
+        sample = {"ego": ego, "agents": agents, "agent_mask": agent_mask, "ego_future": ego_future, **map_feats}
         self._assert_sample_consistency(sample)
         return sample
 
@@ -1033,8 +1069,9 @@ class SceneFeatureExtractor:
         assert sample["map_mask"].shape == (cfg.max_map_polylines,)
         assert sample["route_polyline"].shape == (cfg.route_points, 4)
         assert sample["traffic_lights"].shape == (cfg.max_map_polylines,)
+        assert sample["ego_future"].shape == (cfg.future_steps, 3), sample["ego_future"].shape
         # finiteness: NaNs/Infs here would silently poison training.
-        for key in ("ego", "agents", "map_polylines", "route_polyline", "crosswalks"):
+        for key in ("ego", "agents", "map_polylines", "route_polyline", "crosswalks", "ego_future"):
             assert np.all(np.isfinite(sample[key])), f"non-finite values in {key}"
         # masked agent slots must be all-zero feature rows (no leaked data).
         invalid = ~sample["agent_mask"]

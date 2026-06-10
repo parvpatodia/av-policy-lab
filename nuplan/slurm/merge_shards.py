@@ -25,6 +25,7 @@ import torch
 # Expected F0 tensor spec (must match FeatureConfig in scene_features.py)
 _EXPECTED: Dict[str, Tuple] = {
     "ego":           ((20, 8),   torch.float32),
+    "ego_future":    ((16, 3),   torch.float32),
     "agents":        ((32, 20, 9), torch.float32),
     "agent_mask":    ((32, 20),  torch.bool),
     "map_polylines": ((128, 20, 7), torch.float32),
