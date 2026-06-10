@@ -39,7 +39,7 @@ set -euo pipefail
 : "${NUPLAN_DATA_ROOT:=/scratch/$USER/nuplan/data/cache}"   # parent dir of split subdirs
 : "${DATA_SPLIT:=mini}"                                      # 'mini' (have it) | 'trainval' (full, once downloaded)
 : "${NUPLAN_MAPS_ROOT:=/scratch/$USER/nuplan/maps}"
-: "${OUT_DIR:=/scratch/$USER/av-policy-lab/features/f0}"
+: "${OUT_DIR:=/scratch/$USER/av-policy-lab/features/f0_balanced}"
 : "${SCENARIOS_PER_SHARD:=8}"
 : "${STRIDE:=1}"
 : "${LIMIT:=}"   # leave empty for the whole split; set e.g. 2000 for a costed pilot

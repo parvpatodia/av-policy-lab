@@ -41,12 +41,14 @@ def _verify_shard(path: Path) -> Tuple[int, List[str]]:
     """Load one shard, check each sample against the F0 spec.
     Returns (n_samples_ok, list_of_error_strings)."""
     try:
-        samples = torch.load(str(path), map_location="cpu", weights_only=False)
+        data = torch.load(str(path), map_location="cpu", weights_only=False)
     except Exception as exc:
         return 0, [f"  LOAD ERROR: {exc}"]
 
+    # save_shard writes {"samples": [...], "config": {...}}; accept legacy bare lists too.
+    samples = data.get("samples") if isinstance(data, dict) else data
     if not isinstance(samples, list):
-        return 0, ["  not a list"]
+        return 0, ["  no 'samples' list in shard"]
 
     errors: List[str] = []
     ok = 0
@@ -90,7 +92,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Verify + optionally merge F0 shards")
     ap.add_argument(
         "--base-dir",
-        default="/scratch/patodia.pa/av-policy-lab/features/f0",
+        default="/scratch/patodia.pa/av-policy-lab/features/f0_balanced",
         help="Base directory containing task_NNNN/ sub-dirs (or flat .pt files)",
     )
     ap.add_argument(

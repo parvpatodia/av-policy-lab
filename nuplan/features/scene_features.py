@@ -1229,7 +1229,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument(
         "--out-dir",
         type=str,
-        default="/scratch/$USER/av-policy-lab/features/f0",
+        default="/scratch/$USER/av-policy-lab/features/f0_balanced",
         help="output dir for .pt shards (default a /scratch path)",
     )
     parser.add_argument("--scenarios-per-shard", type=int, default=8)

@@ -15,7 +15,7 @@
 #   python nuplan/slurm/merge_shards.py --verify-only   # check all shards OK
 #
 # Outputs:
-#   /scratch/$USER/av-policy-lab/features/f0/task_NNNN/  (16 sub-dirs)
+#   /scratch/$USER/av-policy-lab/features/f0_balanced/task_NNNN/  (16 sub-dirs)
 #   /scratch/$USER/av-policy-lab/logs/f0-array-{JOB}_{TASK}.out
 #================================================================
 #SBATCH --job-name=av-f0-array
