@@ -1039,6 +1039,13 @@ class SceneFeatureExtractor:
 
         sample = {"ego": ego, "agents": agents, "agent_mask": agent_mask, "ego_future": ego_future, **map_feats}
         self._assert_sample_consistency(sample)
+        # WHY identifiers: F4 scoring, per-type validation gates, and joining
+        # offline scores to closed-loop runs all need to know which scenario a
+        # sample came from; anonymous tensors cannot be audited or stratified.
+        sample["scenario_token"] = str(scenario.token)
+        sample["scenario_type"] = str(scenario.scenario_type)
+        sample["log_name"] = str(scenario.log_name)
+        sample["iteration"] = int(iteration)
         return sample
 
     @staticmethod
@@ -1100,7 +1107,11 @@ class SceneFeatureExtractor:
             raise RuntimeError("torch is required to save shards")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         tensorized = [
-            {k: torch.from_numpy(np.ascontiguousarray(v)) for k, v in s.items()}
+            {
+                # WHY isinstance gate: identifier fields are str/int, not arrays.
+                k: torch.from_numpy(np.ascontiguousarray(v)) if isinstance(v, np.ndarray) else v
+                for k, v in s.items()
+            }
             for s in samples
         ]
         # WHY include config: shards are self-describing — a downstream loader can

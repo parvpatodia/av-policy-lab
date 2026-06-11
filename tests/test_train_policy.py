@@ -23,6 +23,9 @@ def _sample(g):
     base = torch.linspace(0, 5, 16).unsqueeze(1) * torch.tensor([[1.0, 0.2]])
     s["ego_future"] = torch.cat(
         [base + 0.1 * torch.randn(16, 2, generator=g), torch.zeros(16, 1)], dim=1)
+    # v2 shards carry string identifiers; the loop must not choke on them
+    s["scenario_token"] = "tok_abc"
+    s["scenario_type"] = "test_type"
     return s
 
 

@@ -57,6 +57,11 @@ def _verify_shard(path: Path) -> Tuple[int, List[str]]:
         if not isinstance(sample, dict):
             errors.append(f"  sample {i}: not a dict")
             continue
+        # WHY identifier check: v2 shards exist to make samples joinable to
+        # scenarios; a shard without identifiers is the bug we re-extracted to fix.
+        for id_key in ("scenario_token", "scenario_type", "log_name", "iteration"):
+            if id_key not in sample:
+                return f"missing identifier field {id_key}"
         for key, (expected_shape, expected_dtype) in _EXPECTED.items():
             if key not in sample:
                 errors.append(f"  sample {i}: missing key '{key}'")

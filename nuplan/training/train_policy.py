@@ -113,7 +113,9 @@ def evaluate(args, encoder, head, schedule, loader, device) -> dict:
     ade_sum = fde_sum = 0.0
     n = 0
     for batch in loader:
-        batch = {k: v.to(device) for k, v in batch.items()}
+        # WHY tensor check: v2 shards carry scenario identifiers (str) for F4
+        # scoring; strings have no .to() and must pass through untouched.
+        batch = {k: v.to(device) if torch.is_tensor(v) else v for k, v in batch.items()}
         fut_scaled = batch["ego_future"]
         memory = encoder({k: batch[k] for k in ENCODER_KEYS})
         goal = goal_from_batch(args, fut_scaled)
@@ -198,7 +200,8 @@ def train(args) -> dict:
         train_ds.set_epoch(epoch)
         t0, loss_sum, n_steps = time.time(), 0.0, 0
         for batch in train_loader:
-            batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+            batch = {k: v.to(device, non_blocking=True) if torch.is_tensor(v) else v
+                     for k, v in batch.items()}
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
                 memory = encoder({k: batch[k] for k in ENCODER_KEYS})
                 loss = compute_loss(args, head, schedule, memory, batch["ego_future"])
