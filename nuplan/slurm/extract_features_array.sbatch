@@ -47,14 +47,14 @@ LOG_DIR="/scratch/patodia.pa/av-policy-lab/logs"
 
 mkdir -p "$LOG_DIR" "$OUT_DIR"
 
-# ── Conda ─────────────────────────────────────────────────────
-# WHY module purge first: avoids stale PATH/LD_LIBRARY_PATH from
-# login-shell init that can shadow conda's Python.
+# ── Python ────────────────────────────────────────────────────
+# WHY direct binary, not `conda activate`: activation silently fell back
+# to base anaconda on compute nodes (jobs 7510782_15, 7555465_*), running
+# a python with no nuplan module. Calling the env binary by absolute path
+# cannot fail that way; the import guard below makes any regression loud.
 module purge
-module load anaconda3/2024.06
-
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate nuplan
+PYBIN="/home/patodia.pa/.conda/envs/nuplan/bin/python"
+"$PYBIN" -c "import nuplan, torch" || { echo "FATAL: $PYBIN cannot import nuplan/torch" >&2; exit 1; }
 
 # WHY OMP_NUM_THREADS = allocated CPUs: numpy (heavy in map queries)
 # spawns OMP threads; capping to our allocation prevents oversubscription.
@@ -64,7 +64,7 @@ export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 cd "$REPO_ROOT"
 
 echo ""
-echo "Python : $(which python)"
+echo "Python : $PYBIN"
 echo "DATA   : $DATA_ROOT"
 echo "MAP    : $MAP_ROOT"
 echo "OUT    : $OUT_DIR/task_$(printf '%04d' ${SLURM_ARRAY_TASK_ID})"
@@ -74,7 +74,7 @@ echo ""
 # --array-task-id and --num-array-tasks tell the script which DB-file
 # chunk to process.  It writes to a task-specific sub-dir to prevent
 # shard-name collisions under concurrent writes.
-python -u nuplan/features/scene_features.py \
+"$PYBIN" -u nuplan/features/scene_features.py \
     --data-root  "$DATA_ROOT" \
     --map-root   "$MAP_ROOT" \
     --out-dir    "$OUT_DIR" \
