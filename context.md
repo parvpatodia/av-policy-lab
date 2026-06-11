@@ -1,5 +1,5 @@
 # Project Context: av-policy-lab
-> Persistent project memory. Read at session start. Last updated: 2026-06-02.
+> Persistent project memory. Read at session start. Last updated: 2026-06-11.
 
 ## 1. What this project is
 A controlled study of **closed-loop imitation learning for autonomous-driving motion
@@ -13,7 +13,7 @@ multimodality, (b) decomposes its source, or (c) checks whether that conclusion
 survives a realistic simulator. We run a controlled **2x2x2** experiment
 — (precise-point goal vs route-conditioned goal) x (deterministic MLP head vs
 diffusion head) x (IDM agents vs realistic SMART agents) — with a per-scenario
-**interaction-multimodality readout** as the mediator, to test whether a
+**interaction-multimodality score (F4)** as the moderator (effect modifier), to test whether a
 published architectural conclusion ("diffusion > MLP") is an artifact of the
 simulator's background agents. Falsifiable either way; both outcomes are findings.
 Full spec: `docs/frontier/STAGE_0_CONTRIBUTION.md`.
