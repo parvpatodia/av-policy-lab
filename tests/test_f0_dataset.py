@@ -89,3 +89,17 @@ def test_rejects_unlabeled_v1_shards(tmp_path):
     torch.save({"samples": [s], "config": {}}, d / "scene_shard_00000.pt")
     with pytest.raises(KeyError, match="f0_v2"):
         list(F0ShardDataset(tmp_path, shuffle=False))
+
+
+def test_train_val_split_partitions_shards(shard_root):
+    tr = F0ShardDataset(shard_root, shuffle=False, split="train", val_stride=3)
+    va = F0ShardDataset(shard_root, shuffle=False, split="val", val_stride=3)
+    al = F0ShardDataset(shard_root, shuffle=False, split="all")
+    assert set(tr.shards).isdisjoint(va.shards)
+    assert sorted(tr.shards + va.shards) == al.shards
+    assert len(va.shards) == 2  # 6 shards, stride 3 -> indices 0, 3
+
+
+def test_split_rejects_bad_name(shard_root):
+    with pytest.raises(ValueError):
+        F0ShardDataset(shard_root, split="test")

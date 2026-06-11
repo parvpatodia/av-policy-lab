@@ -43,7 +43,14 @@ def unscale_future(fut: torch.Tensor) -> torch.Tensor:
 class F0ShardDataset(IterableDataset):
     """Streams samples from scene_shard_*.pt files under root/task_*/ (or flat)."""
 
-    def __init__(self, root: str | Path, shuffle: bool = True, seed: int = 0):
+    def __init__(
+        self,
+        root: str | Path,
+        shuffle: bool = True,
+        seed: int = 0,
+        split: str = "all",
+        val_stride: int = 10,
+    ):
         super().__init__()
         self.root = Path(root)
         self.shuffle = shuffle
@@ -54,6 +61,16 @@ class F0ShardDataset(IterableDataset):
         )
         if not self.shards:
             raise FileNotFoundError(f"no scene_shard_*.pt under {self.root}")
+        # WHY shard-level split (not sample-level): scenarios within a shard
+        # come from the same DB files; splitting by shard keeps near-duplicate
+        # frames of one scenario out of both sides. Sorted order makes the
+        # split deterministic across runs and machines.
+        if split == "train":
+            self.shards = [s for i, s in enumerate(self.shards) if i % val_stride != 0]
+        elif split == "val":
+            self.shards = [s for i, s in enumerate(self.shards) if i % val_stride == 0]
+        elif split != "all":
+            raise ValueError(f"split must be all|train|val, got {split!r}")
 
     def set_epoch(self, epoch: int) -> None:
         """Call once per epoch so the shuffle order differs across epochs."""
@@ -95,8 +112,11 @@ def make_loader(
     shuffle: bool = True,
     seed: int = 0,
     num_workers: int = 0,
+    split: str = "all",
 ) -> torch.utils.data.DataLoader:
-    ds = F0ShardDataset(root, shuffle=shuffle, seed=seed)
+    ds = F0ShardDataset(root, shuffle=shuffle, seed=seed, split=split)
+    # WHY drop_last only when training: val must score every sample, and a
+    # partial final batch is harmless there.
     return torch.utils.data.DataLoader(
-        ds, batch_size=batch_size, num_workers=num_workers, drop_last=True
+        ds, batch_size=batch_size, num_workers=num_workers, drop_last=shuffle
     )
