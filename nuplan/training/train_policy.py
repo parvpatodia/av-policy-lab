@@ -193,7 +193,9 @@ def train(args) -> dict:
         print(f"[resume] {latest} -> epoch {start_epoch}, best minADE {best:.3f}")
 
     bad_epochs = 0
-    use_amp = device.type == "cuda"
+    # WHY bf16 gate: V100s (no bf16 hardware) silently emulate or fail;
+    # autocast only where bf16 is native (Ampere+)
+    use_amp = device.type == "cuda" and torch.cuda.is_bf16_supported()
     epoch = start_epoch - 1  # WHY: if the run already hit --epochs, the loop
     # body never executes and the return below must still be well-defined
     for epoch in range(start_epoch, args.epochs):

@@ -26,10 +26,11 @@ mkdir -p "$CKPT_DIR" /scratch/patodia.pa/av-policy-lab/logs
 # WHY direct binary: conda activate fell back to base on compute nodes
 # (jobs 7510782_15, 7555465_*); absolute path cannot.
 module purge
-PYBIN="/home/patodia.pa/.conda/envs/nuplan/bin/python"
-"$PYBIN" -c "import torch; import models.scene_encoder" 2>/dev/null \
-  || PYTHONPATH="$REPO_ROOT/nuplan" "$PYBIN" -c "import torch, models.scene_encoder" \
-  || { echo "FATAL: env import failed" >&2; exit 1; }
+# WHY pytorch_env: the nuplan env ships CPU-only torch (2.8.0+cpu); training
+# in it ran on 4 CPU cores (job 7600266). pytorch_env has torch 2.4.1+cu121.
+PYBIN="/home/patodia.pa/.conda/envs/pytorch_env/bin/python"
+PYTHONPATH="$REPO_ROOT/nuplan" "$PYBIN" -c "import torch, models.scene_encoder; assert torch.cuda.is_available(), "no CUDA"" \
+  || { echo "FATAL: env import or CUDA check failed" >&2; exit 1; }
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 
@@ -40,4 +41,4 @@ PYTHONPATH="$REPO_ROOT/nuplan" "$PYBIN" -u nuplan/training/train_policy.py \
     --head "$HEAD" --goal "$GOAL" \
     --data-root "$DATA_ROOT" \
     --ckpt-dir  "$CKPT_DIR" \
-    --epochs 150 --batch-size 64 --num-workers 2 --seed 0
+    --epochs 150 --batch-size 64 --num-workers 2 --seed 0 --device cuda

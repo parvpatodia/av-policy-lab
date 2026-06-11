@@ -124,7 +124,9 @@ def pass_map(smoke: int = 0) -> None:
     shard_scores = json.loads(shard_path.read_text())
     tokens = {t for t, r in shard_scores.items() if not r["excluded"]}
     if smoke:
-        tokens = set(sorted(tokens)[:smoke])
+        # take smoke tokens from the alphabetically first logs so the first
+        # rebuilt DB chunk already contains them (fast smoke, no full rebuild)
+        tokens = set(sorted(tokens, key=lambda t: (shard_scores[t]["log_name"], t))[:smoke])
     print(f"map pass over {len(tokens)} scenarios")
     index = _build_token_index(tokens)
     missing = tokens - set(index)
