@@ -26,6 +26,9 @@ mkdir -p "$CKPT_DIR" /scratch/patodia.pa/av-policy-lab/logs
 # WHY direct binary: conda activate fell back to base on compute nodes
 # (jobs 7510782_15, 7555465_*); absolute path cannot.
 module purge
+# WHY PYTHONNOUSERSITE: ~/.local/lib pip packages shadow the conda env
+# (a broken user-site torch killed job 7605681 with missing libnvJitLink).
+export PYTHONNOUSERSITE=1
 # WHY pytorch_env: the nuplan env ships CPU-only torch (2.8.0+cpu); training
 # in it ran on 4 CPU cores (job 7600266). pytorch_env has torch 2.4.1+cu121.
 PYBIN="/home/patodia.pa/.conda/envs/pytorch_env/bin/python"
