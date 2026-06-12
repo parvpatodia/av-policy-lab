@@ -1,4 +1,6 @@
 # STAGE 3 — ARCHITECTURE
+> NOTE (2026-06-11): tensor shapes in this document may lag the code. The canonical shapes are the asserts in nuplan/features/scene_features.py (_assert_sample_consistency) plus the F0 v2 additions: ego_future (16,3) and per-sample scenario identifiers.
+
 
 > Status: DESIGN ONLY. Dims/param counts are target specifications. Builds on Stage 2 tensors and the multimodal route-region goal.
 

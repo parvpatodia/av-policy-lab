@@ -108,3 +108,39 @@ closed-loop fine-tuning (F4).
 **Rationale:** The DAgger null proved closed-loop data is wasted on a road-blind
 representation — fix perception first, then teach recovery.
 **Consequences:** Locks the F-stage order; prevents repeating the DAgger mistake.
+
+## ADR-012 — Scenario identifiers stored in every shard sample (2026-06-10)
+F0 v2 shards carry scenario_token, scenario_type, log_name, iteration per
+sample. Without them, per-type validation gates, scenario_type-clustered
+statistics, and joining offline F4 scores to closed-loop runs are impossible.
+Cost: cancelled extraction 7558604 (~1.6 h compute) rather than lose 7 h to a
+later full re-run. Anonymous tensors cannot be audited.
+
+## ADR-013 — F4 is model-free and never reads ego_future (2026-06-10)
+The interaction-multimodality score is computed from scene structure only:
+corridor lane-graph branching (map API) + PrET band-pass interaction geometry.
+Two traps closed at review: (a) using the diffusion head's sample spread as
+the moderator is near-tautological; (b) using ego_future leaks the expert's
+resolution of each yield-or-go into the moderator and biases the moderation
+slope. Ego's nominal path rolls along the route corridor instead. Model-based
+dispersion (APD/FSD) is a secondary manipulation check only.
+Full spec with verified citations: docs/frontier/F4_SPEC.md.
+
+## ADR-014 — SMART axis via CAT-K warm start; deliverable is a recipe, not weights (2026-06-11)
+SMART-tiny checkpoints (pre_bc_E31, clsft_E9) obtained from the CAT-K authors
+for academic use. They are WOMD-derived: per the Waymo dataset terms, neither
+they nor weights fine-tuned from them are redistributable. The repo therefore
+publishes the nuPlan port + fine-tune recipe; weights stay private. Plan:
+nuPlan data adapter -> vocab compatibility check -> BC fine-tune (frozen
+embeddings, per the authors' own finetune.py recipe) -> AbstractObservation
+wrapper at the model's native 0.5 s token rate.
+
+## ADR-015 — Separate envs for extraction and training, both hard-guarded (2026-06-11)
+The nuplan conda env ships CPU-only torch; training in it silently ran on 4
+CPU cores (job 7600266, caught after one epoch failed to finish in an hour).
+A second failure mode followed: ~/.local pip packages shadowed the conda env
+(broken user-site torch, job 7605681). Extraction runs in the nuplan env
+(devkit), training in pytorch_env (CUDA) with PYTHONNOUSERSITE=1, and every
+sbatch asserts its env can import its deps AND see its hardware before
+starting. Silent fallback is treated as a bug class, not a config nit.
+
