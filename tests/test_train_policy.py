@@ -90,6 +90,9 @@ def test_resume_is_bit_exact(data_root, tmp_path):
     for part in ("encoder", "head"):
         for k in ck_a[part]:
             assert torch.equal(ck_a[part][k], ck_b[part][k]), f"{part}.{k} diverged"
+    for k in ck_a["ema"]["shadow"]:
+        assert torch.equal(ck_a["ema"]["shadow"][k], ck_b["ema"]["shadow"][k]), \
+            f"ema.{k} diverged"
 
 
 def test_resume_skips_finished_run(data_root, tmp_path, capsys):

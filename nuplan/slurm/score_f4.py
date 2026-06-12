@@ -179,7 +179,11 @@ def pass_combine() -> None:
     results = {}
     for tok, row in shard_scores.items():
         m = map_scores.get(tok, {})
-        if row.get("excluded") or m.get("excluded", True) or "s_branch" not in m:
+        # WHY b_r == 0 excludes: zero corridor terminals means ego could not
+        # be localized on the route graph — a measurement failure, not
+        # evidence of zero ambiguity (was mis-scored as s_branch=0 in v1.0).
+        if (row.get("excluded") or m.get("excluded", True)
+                or "s_branch" not in m or m.get("b_r", 0) == 0):
             results[tok] = {**row, "f4": None, "excluded": True}
             continue
         f4 = combine(m["s_branch"], 0.0, row["s_inter"], row["g_stop"])

@@ -18,6 +18,7 @@ unscale_future() before computing metric-space (meter) errors.
 """
 from __future__ import annotations
 
+import math
 import random
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
@@ -26,17 +27,23 @@ import torch
 from torch.utils.data import IterableDataset, get_worker_info
 
 FUTURE_SCALE = 10.0
+# WHY scale heading by pi: raw radians span [-pi, pi] while scaled xy spans
+# ~[-1, 1]; unscaled heading dominates the 3-channel MSE ~10:1 per unit of
+# displacement error. Biases both heads identically but wastes capacity.
+HEADING_SCALE = math.pi
 
-# heading (3rd channel) is radians, already ~unit — only x,y are scaled
+
 def scale_future(fut: torch.Tensor) -> torch.Tensor:
     out = fut.clone()
     out[..., :2] = out[..., :2] / FUTURE_SCALE
+    out[..., 2:3] = out[..., 2:3] / HEADING_SCALE
     return out
 
 
 def unscale_future(fut: torch.Tensor) -> torch.Tensor:
     out = fut.clone()
     out[..., :2] = out[..., :2] * FUTURE_SCALE
+    out[..., 2:3] = out[..., 2:3] * HEADING_SCALE
     return out
 
 

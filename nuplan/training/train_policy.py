@@ -46,6 +46,49 @@ ENCODER_KEYS = (
 )
 
 
+class EMA:
+    """Exponential moving average over encoder+head parameters.
+
+    WHY on both heads: EMA is standard for diffusion policies (Chi et al.,
+    arXiv:2303.04137 use it); fairness requires the regressor twin get the
+    identical treatment. Validation and best.pt use EMA weights; the raw
+    weights keep training. State is checkpointed so resume stays bit-exact.
+    """
+
+    def __init__(self, modules: dict, decay: float = 0.999):
+        self.decay = decay
+        self.modules = modules
+        self.shadow = {
+            f"{m}.{k}": p.detach().clone()
+            for m, mod in modules.items() for k, p in mod.named_parameters()
+        }
+
+    @torch.no_grad()
+    def update(self):
+        for m, mod in self.modules.items():
+            for k, p in mod.named_parameters():
+                s = self.shadow[f"{m}.{k}"]
+                s.mul_(self.decay).add_(p.detach(), alpha=1.0 - self.decay)
+
+    @torch.no_grad()
+    def swap(self):
+        """Exchange live and shadow parameters (call again to restore)."""
+        for m, mod in self.modules.items():
+            for k, p in mod.named_parameters():
+                s = self.shadow[f"{m}.{k}"]
+                tmp = p.detach().clone()
+                p.copy_(s)
+                s.copy_(tmp)
+
+    def state_dict(self):
+        return {"decay": self.decay, "shadow": self.shadow}
+
+    def load_state_dict(self, sd):
+        self.decay = sd["decay"]
+        for k, v in sd["shadow"].items():
+            self.shadow[k].copy_(v)
+
+
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--head", choices=("det", "diff"), required=True)
@@ -65,6 +108,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--val-k", type=int, default=8,
                    help="diffusion: candidates per scene for minADE")
     p.add_argument("--ddim-steps", type=int, default=20)
+    p.add_argument("--ema-decay", type=float, default=0.999)
     p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return p.parse_args(argv)
@@ -135,11 +179,12 @@ def evaluate(args, encoder, head, schedule, loader, device) -> dict:
     return {"minADE": ade_sum / n, "minFDE": fde_sum / n, "n_val": n}
 
 
-def save_ckpt(path: Path, encoder, head, opt, epoch, global_step, best, args):
+def save_ckpt(path: Path, encoder, head, opt, ema, epoch, global_step, best, args):
     payload = {
         "encoder": encoder.state_dict(),
         "head": head.state_dict(),
         "opt": opt.state_dict(),
+        "ema": ema.state_dict(),
         "epoch": epoch,
         "global_step": global_step,
         "best_minADE": best,
@@ -167,6 +212,7 @@ def train(args) -> dict:
         list(encoder.parameters()) + list(head.parameters()),
         lr=args.lr, weight_decay=args.weight_decay,
     )
+    ema = EMA({"encoder": encoder, "head": head}, decay=args.ema_decay)
 
     train_ds = F0ShardDataset(args.data_root, shuffle=True, seed=args.seed,
                               split="train", val_stride=args.val_stride)
@@ -184,6 +230,10 @@ def train(args) -> dict:
         encoder.load_state_dict(ck["encoder"])
         head.load_state_dict(ck["head"])
         opt.load_state_dict(ck["opt"])
+        if "ema" in ck:
+            ema.load_state_dict(ck["ema"])
+        else:
+            print("[resume] pre-EMA checkpoint: shadow re-seeded from live weights")
         start_epoch, global_step = ck["epoch"] + 1, ck["global_step"]
         best = ck["best_minADE"]
         torch.set_rng_state(ck["rng"]["torch"])
@@ -217,11 +267,14 @@ def train(args) -> dict:
             for g in opt.param_groups:
                 g["lr"] = args.lr * warm
             opt.step()
+            ema.update()
             loss_sum += loss.item()
             n_steps += 1
             global_step += 1
 
+        ema.swap()
         val = evaluate(args, encoder, head, schedule, val_loader, device)
+        ema.swap()
         row = {
             "epoch": epoch, "step": global_step,
             "train_loss": loss_sum / max(1, n_steps),
@@ -234,10 +287,10 @@ def train(args) -> dict:
 
         if val["minADE"] < best:
             best, bad_epochs = val["minADE"], 0
-            save_ckpt(out / "best.pt", encoder, head, opt, epoch, global_step, best, args)
+            save_ckpt(out / "best.pt", encoder, head, opt, ema, epoch, global_step, best, args)
         else:
             bad_epochs += 1
-        save_ckpt(latest, encoder, head, opt, epoch, global_step, best, args)
+        save_ckpt(latest, encoder, head, opt, ema, epoch, global_step, best, args)
         if bad_epochs >= args.patience:
             print(f"[early-stop] no val improvement for {args.patience} epochs")
             break

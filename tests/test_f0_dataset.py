@@ -1,4 +1,6 @@
 """Tests for the F0 v2 shard dataset. Builds synthetic shards in tmp dirs."""
+import math
+
 import torch
 import pytest
 
@@ -54,7 +56,7 @@ def test_future_scaling_roundtrip(shard_root):
     s = next(iter(ds))
     raw = s["ego"][0, 0].item()  # inputs untouched -> raw tag value
     assert s["ego_future"][0, 0].item() == pytest.approx(raw / FUTURE_SCALE)
-    assert s["ego_future"][0, 2].item() == pytest.approx(raw)  # heading unscaled
+    assert s["ego_future"][0, 2].item() == pytest.approx(raw / math.pi)
     x = torch.randn(16, 3)
     assert torch.allclose(unscale_future(scale_future(x)), x, atol=1e-6)
 
