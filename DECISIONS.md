@@ -153,3 +153,30 @@ ambiguity. v1.1 removes the headway branch, demotes S_lane to a covariate,
 and re-registers the gate lists against mini's actual type inventory.
 Revision happened pre-unblinding; the moderator firewall holds. Spec sec. 7.
 
+## ADR-017 — v3 dataset: parity histories, corridor route, recovery perturbation, type enrichment (2026-06-12)
+Four changes, each closing an audit finding, all in one re-extraction (f0_v3):
+1. Per-iteration history queries replace batched past-trajectory sampling.
+   The parity gate (nuplan/serving/parity_check.py) caught real skew (max
+   feature diff 1.9) between offline extraction and what the simulator hands
+   the planner; after the change the gate passes 60/60 tensors. Offline must
+   match serving, not the other way around.
+2. Route channel switches from lane centerline to roadblock-corridor sweep
+   (route_mode="corridor"). The centerline picked one successor per fork and
+   leaked the expert's branch choice into every cell, partially collapsing
+   the ambiguity the route-region condition exists to preserve (open-loop
+   evidence: det_route reached 0.35 m minADE, near the precise cells).
+   Corridor mode = turn-by-turn navigation input, lane choice left open.
+   Lane mode kept for the leak ablation.
+3. Recovery perturbation (perturb_prob 0.5): blend the history tail toward a
+   perturbed current pose (lat sigma 0.3 m clip 1.0, heading sigma 0.05 rad
+   clip 0.2), label stays the true expert future in the perturbed frame.
+   Without it, closed-loop measures off-distribution brittleness (our own
+   DAgger null), not policy quality. Deterministic per (token, iteration).
+4. CORRECTION to ADR-016: the canonical junction types DO exist in mini
+   (46 types unrestricted vs 32 captured). The chunked per-type filter
+   dropped them, suspected remove_invalid_goals=True interaction, under
+   investigation. v3 adds an enrichment task (task_0016) explicitly
+   requesting 11 junction/turn/pedestrian types across all logs. F4 gate
+   lists will be re-run against the enriched inventory; the original
+   pre-registered high types become evaluable after all.
+

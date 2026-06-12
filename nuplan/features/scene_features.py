@@ -91,6 +91,25 @@ class FeatureConfig:
     route_points: int = 40           # R — resampled route centerline points
     route_reach_m: float = 120.0     # cap on route arc-length (matches STAGE_2 §4)
     route_max_chain: int = 12        # max successor lanes to chain (loop guard)
+    # WHY corridor mode (v3, ADR-017): the lane-centerline route picks ONE
+    # successor at every fork, leaking the expert's branch choice into all
+    # four cells and collapsing the ambiguity the route-region condition
+    # exists to preserve. Corridor mode averages each roadblock's lane
+    # baselines (roadblock-level turn-by-turn, what a navigator provides)
+    # and never commits to a lane. "lane" mode kept for the leak ablation.
+    route_mode: str = "corridor"     # "corridor" (v3) | "lane" (v2 ablation)
+    # WHY perturbation (v3, ADR-017): pure-expert histories train policies
+    # that have never seen an off-path state; closed-loop then measures
+    # recovery brittleness, not policy quality (our own DAgger result).
+    # Standard recovery augmentation: blend the last steps toward a perturbed
+    # current pose; the label stays the TRUE expert future in the perturbed
+    # frame, so the target is the recovery maneuver.
+    perturb_prob: float = 0.0        # set 0.5 for v3 training extraction
+    perturb_lat_std_m: float = 0.3
+    perturb_lat_max_m: float = 1.0
+    perturb_head_std_rad: float = 0.05
+    perturb_head_max_rad: float = 0.2
+    perturb_blend_steps: int = 5
 
     # --- normalization scales (STAGE_2 §1) ---
     pos_scale_m: float = 120.0       # positions / max-radius
@@ -763,9 +782,20 @@ class MapFeatureBuilder:
         """
         from nuplan.common.maps.maps_datatypes import SemanticMapLayer  # devkit-only
 
-        route_world = self._resolve_route_centerline(
-            map_api, route_roadblock_ids, ego_world_xy, proximal_lanes, SemanticMapLayer
-        )
+        if self._cfg.route_mode == "corridor":
+            route_world = self._resolve_route_corridor(
+                map_api, route_roadblock_ids, ego_world_xy, SemanticMapLayer
+            )
+            if route_world is None:  # corridor unresolved: old fallback path
+                route_world = self._resolve_route_centerline(
+                    map_api, route_roadblock_ids, ego_world_xy, proximal_lanes,
+                    SemanticMapLayer,
+                )
+        else:
+            route_world = self._resolve_route_centerline(
+                map_api, route_roadblock_ids, ego_world_xy, proximal_lanes,
+                SemanticMapLayer,
+            )
         R = self._cfg.route_points
         if route_world is None or len(route_world) < 2:
             return (
@@ -779,6 +809,49 @@ class MapFeatureBuilder:
         out[:, 0:2] = self._norm.norm_pos(route_res)
         out[:, 2:4] = dirs
         return out, np.ones((R,), dtype=bool)
+
+    def _resolve_route_corridor(
+        self,
+        map_api: "AbstractMap",
+        route_roadblock_ids: List[str],
+        ego_world_xy: Tuple[float, float],
+        SemanticMapLayer,
+    ) -> Optional[np.ndarray]:
+        """Roadblock-level corridor sweep (M, 2) world frame, or None.
+
+        Per route roadblock (IN ORDER), resample every interior lane baseline
+        to a fixed count and average them: the sweep follows the corridor and
+        the turn-by-turn intent without committing to any lane. The arm of a
+        junction is revealed by the roadblock SEQUENCE, which is legitimate
+        navigation input; the lane-level path is not.
+        """
+        pts = []
+        for rb_id in [str(i) for i in (route_roadblock_ids or [])]:
+            lanes = self._roadblock_interior_lanes(map_api, rb_id, SemanticMapLayer)
+            paths = [self._discrete_path_xy(l) for l in lanes]
+            paths = [q for q in paths if q is not None and len(q) >= 2]
+            if not paths:
+                continue
+            res = np.stack([resample_polyline(q, 5) for q in paths])
+            pts.append(res.mean(axis=0))
+        if not pts:
+            return None
+        corridor = np.vstack(pts)
+        if len(corridor) < 2:
+            return None
+        ego_xy = np.array(ego_world_xy, dtype=np.float64)
+        i0 = int(np.argmin(np.linalg.norm(corridor - ego_xy, axis=1)))
+        out = corridor[max(0, i0 - 1):]
+        if len(out) < 2:
+            out = corridor
+        # WHY trim to route_reach_m: untrimmed, the sweep spans the whole
+        # route (km scale), blowing past pos_scale_m and starving the next
+        # 100 m of resolution after the 40-point resample.
+        seg = np.linalg.norm(np.diff(out, axis=0), axis=1)
+        cum = np.concatenate([[0.0], np.cumsum(seg)])
+        keep = int(np.searchsorted(cum, self._cfg.route_reach_m)) + 1
+        out = out[: max(keep, 2)]
+        return out
 
     def _resolve_route_centerline(
         self,
@@ -973,6 +1046,10 @@ class SceneFeatureExtractor:
         for it in range(max(0, iteration - n_hist + 1), iteration + 1):
             ego_states.append(scenario.get_ego_state_at_iteration(it))
             per_step_tracks.append(scenario.get_tracked_objects_at_iteration(it))
+        if cfg.perturb_prob > 0.0:
+            ego_states = self._maybe_perturb_history(
+                ego_states, str(scenario.token), int(iteration)
+            )
         traffic_lights = list(
             scenario.get_traffic_light_status_at_iteration(iteration)  # [VERIFIED]
         )
@@ -1070,6 +1147,45 @@ class SceneFeatureExtractor:
         )
         feats = {"ego": ego, "agents": agents, "agent_mask": agent_mask, **map_feats}
         return feats, transform, current_ego
+
+    def _maybe_perturb_history(self, ego_states: list, token: str, iteration: int) -> list:
+        """Recovery augmentation: blend the tail of the ego history toward a
+        laterally/heading-perturbed current pose. Deterministic per
+        (token, iteration) so extraction is resume-safe and reproducible.
+        Serving NEVER perturbs; this runs only in the offline adapter."""
+        cfg = self._cfg
+        rng = np.random.default_rng(abs(hash((token, iteration))) % (2**31))
+        if rng.random() >= cfg.perturb_prob:
+            return ego_states
+        from nuplan.common.actor_state.ego_state import EgoState
+        from nuplan.common.actor_state.state_representation import StateSE2
+
+        lat = float(np.clip(rng.normal(0.0, cfg.perturb_lat_std_m),
+                            -cfg.perturb_lat_max_m, cfg.perturb_lat_max_m))
+        dh = float(np.clip(rng.normal(0.0, cfg.perturb_head_std_rad),
+                           -cfg.perturb_head_max_rad, cfg.perturb_head_max_rad))
+        h_cur = ego_states[-1].rear_axle.heading
+        ox, oy = -np.sin(h_cur) * lat, np.cos(h_cur) * lat
+        m = min(cfg.perturb_blend_steps, len(ego_states))
+        out = list(ego_states)
+        for j in range(m):
+            idx = len(out) - m + j
+            frac = (j + 1) / m              # 1/m ... 1.0 (current pose fully shifted)
+            st = out[idx]
+            pose = StateSE2(
+                st.rear_axle.x + ox * frac,
+                st.rear_axle.y + oy * frac,
+                st.rear_axle.heading + dh * frac,
+            )
+            out[idx] = EgoState.build_from_rear_axle(
+                rear_axle_pose=pose,
+                rear_axle_velocity_2d=st.dynamic_car_state.rear_axle_velocity_2d,
+                rear_axle_acceleration_2d=st.dynamic_car_state.rear_axle_acceleration_2d,
+                tire_steering_angle=st.tire_steering_angle,
+                time_point=st.time_point,
+                vehicle_parameters=st.car_footprint.vehicle_parameters,
+            )
+        return out
 
     @staticmethod
     def _normalize_history_length(items: list, n: int) -> list:
@@ -1192,6 +1308,7 @@ def _build_mini_scenarios(
     limit: int,
     log_names: Optional[List[str]] = None,
     num_scenarios_per_type: Optional[int] = None,
+    scenario_types: Optional[List[str]] = None,
 ) -> List["AbstractScenario"]:
     """Construct nuPlan scenarios from a data root (used by --smoke on MINI and the full run).
 
@@ -1222,7 +1339,7 @@ def _build_mini_scenarios(
         map_version="nuplan-maps-v1.0",
     )
     scenario_filter = ScenarioFilter(
-        scenario_types=None,
+        scenario_types=scenario_types,
         scenario_tokens=None,
         # WHY log_names: ScenarioFilter already supports per-log filtering.
         # Passing a list here restricts the builder to those specific DB files,
@@ -1314,6 +1431,18 @@ def main(argv: Optional[List[str]] = None) -> None:
     # partition.  Each task writes to its own sub-directory; a DataLoader can
     # glob all sub-dirs, or run nuplan/slurm/merge_shards.py post-extraction.
     parser.add_argument(
+        "--scenario-types",
+        type=str,
+        default=None,
+        help="Comma-separated scenario types (enrichment task for rare types).",
+    )
+    parser.add_argument(
+        "--perturb-prob",
+        type=float,
+        default=None,
+        help="Recovery-augmentation probability (v3 training extraction: 0.5).",
+    )
+    parser.add_argument(
         "--array-task-id",
         type=int,
         default=None,
@@ -1387,13 +1516,19 @@ def main(argv: Optional[List[str]] = None) -> None:
         # each other.  Sub-dirs are trivially merged by a glob at training time.
         out_dir = out_dir / f"task_{args.array_task_id:04d}"
 
-    extractor = SceneFeatureExtractor()
+    # WHY dataclasses.replace: FeatureConfig is frozen by design (a config
+    # mutated mid-run cannot be trusted in the shard header).
+    feat_cfg = FeatureConfig()
+    if args.perturb_prob is not None:
+        feat_cfg = dataclasses.replace(feat_cfg, perturb_prob=args.perturb_prob)
+    extractor = SceneFeatureExtractor(feat_cfg)
     scenarios = _build_mini_scenarios(
         args.data_root,
         args.map_root,
         args.limit or 10_000_000,
         log_names=log_names,
         num_scenarios_per_type=args.num_scenarios_per_type,
+        scenario_types=(args.scenario_types.split(",") if args.scenario_types else None),
     )
     if not scenarios:
         logger.warning("No scenarios found for task %s — exiting cleanly.", args.array_task_id)

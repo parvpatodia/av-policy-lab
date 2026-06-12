@@ -41,7 +41,7 @@ echo "======================================="
 # ── Paths (hardcoded to actual staged layout) ─────────────────
 DATA_ROOT="/scratch/patodia.pa/nuplan/data/cache/mini"
 MAP_ROOT="/scratch/patodia.pa/nuplan/maps"
-OUT_DIR="/scratch/patodia.pa/av-policy-lab/features/f0_v2"
+OUT_DIR="/scratch/patodia.pa/av-policy-lab/features/f0_v3"
 REPO_ROOT="/home/patodia.pa/av-policy-lab"
 LOG_DIR="/scratch/patodia.pa/av-policy-lab/logs"
 
@@ -81,7 +81,8 @@ echo ""
     --array-task-id   "${SLURM_ARRAY_TASK_ID}" \
     --num-array-tasks 16 \
     --num-scenarios-per-type 20 \
-    --stride 5
+    --stride 5 \
+    --perturb-prob 0.5
 
 EXIT_CODE=$?
 
