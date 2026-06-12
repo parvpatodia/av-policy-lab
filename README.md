@@ -41,7 +41,7 @@ evaluate closed-loop:
   Motivated by Hagedorn et al. (arXiv:2510.14677), who showed IDM agents
   inflate nuPlan scores and reshuffle planner rankings.
 
-## Status (honest)
+## Status
 
 Done and tested:
 - F0: vectorized scene extraction from nuPlan mini. 707 shards, 431,508
