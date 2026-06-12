@@ -168,13 +168,40 @@ def pass_map(smoke: int = 0) -> None:
         print(f"{t:42s} {len(by_type[t]):5d} {np.median(by_type[t]):9.3f}")
 
 
+def pass_combine() -> None:
+    """v1.1 recombine: fresh shard-side scores + map fields already computed
+    by an earlier --pass map run (b_r/n_par/s_branch are version-independent).
+    F4 v1.1 = G_stop * (1 - (1-S_branch)(1-S_inter)); S_lane is reported as a
+    covariate but excluded from the scalar (ADR-016: it saturates on Vegas
+    multi-lane roadblocks and floors the score)."""
+    shard_scores = json.loads((OUT_DIR / "shard_scores.json").read_text())
+    map_scores = json.loads((OUT_DIR / "f4_scores.json").read_text())
+    results = {}
+    for tok, row in shard_scores.items():
+        m = map_scores.get(tok, {})
+        if row.get("excluded") or m.get("excluded", True) or "s_branch" not in m:
+            results[tok] = {**row, "f4": None, "excluded": True}
+            continue
+        f4 = combine(m["s_branch"], 0.0, row["s_inter"], row["g_stop"])
+        results[tok] = {**row, "b_r": m["b_r"], "n_par": m["n_par"],
+                        "s_branch": m["s_branch"], "s_lane": m["s_lane"],
+                        "f4": f4, "f4_version": "1.1"}
+    out = OUT_DIR / "f4_scores_v11.json"
+    out.write_text(json.dumps(results))
+    n_ok = sum(1 for r in results.values() if r.get("f4") is not None)
+    print(f"combine done: {n_ok}/{len(results)} scored -> {out}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pass", dest="which", choices=("shards", "map"), required=True)
+    ap.add_argument("--pass", dest="which", choices=("shards", "map", "combine"),
+                    required=True)
     ap.add_argument("--smoke", type=int, default=0)
     a = ap.parse_args()
     if a.which == "shards":
         pass_shards()
+    elif a.which == "combine":
+        pass_combine()
     else:
         pass_map(a.smoke)
 

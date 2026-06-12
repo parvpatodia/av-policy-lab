@@ -123,6 +123,47 @@ Shards carry scenario_token, scenario_type, log_name, iteration per sample
 Agent type one-hot already present (dims 6:9). traffic_lights encoding and
 10 Hz / 2 s agent history confirmed from source.
 
+## 7. v1.1 revision (2026-06-11, ADR-016) — gate-driven, pre-unblinding
+
+The full gate run over 5,604 mini scenarios FAILED gate 1 (17% vs the 80%
+requirement) and exposed three defects. No head comparison existed at
+revision time; the moderator firewall holds.
+
+What the data showed:
+1. Four of five pre-registered high types (starting_left_turn,
+   starting_right_turn, starting_unprotected_cross_turn,
+   waiting_for_pedestrian_to_cross) DO NOT EXIST in nuPlan mini. Gate 1 was
+   unevaluable as registered.
+2. S_lane saturated: 69% of scenarios at s_lane = 1.0 (Vegas roadblocks carry
+   4-7 parallel lanes), flooring median F4 at 0.50 and destroying contrast.
+3. The headway (non-crossing) branch of S_inter rewarded plain car-following:
+   following_lane_with_lead (registered LOW) scored median 0.668, above every
+   evaluable HIGH type. Mid-headway following is longitudinal regulation, not
+   a discrete decision; scoring it was a design error. PrET crossings behaved
+   correctly.
+
+v1.1 definition:
+    F4 = G_stop * (1 - (1 - S_branch) * (1 - S_inter))
+- S_inter: PrET band-pass over path-crossing agents + stationary-pedestrian
+  override ONLY. The headway branch is removed.
+- S_lane: computed and reported as a descriptive covariate, EXCLUDED from the
+  scalar. Revisit only with adjacency-based reachability if a lane-decision
+  hypothesis becomes load-bearing.
+- All other constants unchanged.
+
+Gate-1 lists re-registered against the types that exist in mini, on the same
+a-priori semantics (lateral maneuvers and unstructured zones = high; static /
+regulated-stop / lead-following = low), chosen before any v1.1 score was seen:
+- HIGH: traversing_pickup_dropoff, high_lateral_acceleration,
+  changing_lane_to_left (n=2, reported but excluded from the gate),
+  changing_lane_to_right (n=2, idem), traversing_traffic_light_intersection
+- LOW: stationary, stopping_with_lead, following_lane_without_lead,
+  stationary_at_traffic_light_with_lead, stopping_at_traffic_light_without_lead
+Known tension recorded honestly: the original inclusion of
+waiting_for_pedestrian_to_cross as HIGH contradicted the band-pass logic
+(an active forced yield is unimodal); it is moot on mini but the lists for
+full nuPlan must resolve it.
+
 ## 6. Bibliography (all fetched and verified)
 - Yuan & Kitani, DLow, ECCV 2020, arXiv:2003.08386 — APD definition.
 - Yuan & Kitani, DPP forecasting, ICLR 2020, arXiv:1907.04967 — ASD/FSD.

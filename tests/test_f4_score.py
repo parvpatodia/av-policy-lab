@@ -95,16 +95,12 @@ def test_crossing_agent_at_extreme_gap_scores_low():
     assert r["s_inter"] < 0.2, r
 
 
-def test_lead_vehicle_band_pass():
-    # lead car 12 m ahead at v0=8 -> tau=1.5 s = band center
+def test_lead_vehicle_does_not_score():
+    # v1.1 (ADR-016): a same-direction lead is longitudinal regulation, not a
+    # yield-or-go decision; it must contribute nothing
     s = _empty_scene(v0=8.0)
     _add_agent(s, 0, (12.0, 0.5), 0.0, 8.0)
-    high = score_sample(s, CFG)["s_inter"]
-    # lead car 2 m ahead -> tau=0.25 s, forced behavior, low ambiguity
-    s2 = _empty_scene(v0=8.0)
-    _add_agent(s2, 0, (2.0, 0.5), 0.0, 8.0)
-    low = score_sample(s2, CFG)["s_inter"]
-    assert high > 0.9 and low < high * 0.5, (high, low)
+    assert score_sample(s, CFG)["s_inter"] == 0.0
 
 
 def test_off_corridor_agent_ignored():
@@ -113,18 +109,29 @@ def test_off_corridor_agent_ignored():
     assert score_sample(s, CFG)["s_inter"] == 0.0
 
 
+def _crossing_agent_args(t_ego, gap_s, speed=10.0):
+    """Start position/heading for an agent crossing ego's path (from +y) at
+    the point ego reaches at t_ego, arriving gap_s seconds earlier."""
+    cross = np.array([8.0 * t_ego, 0.0])
+    start = cross + np.array([0.0, speed * (t_ego - gap_s)])
+    return start, -math.pi / 2, speed
+
+
 def test_platoon_saturation_capped():
-    # 8 near-identical off-peak leads (tau ~1.9 s, I_j < 1); top-3 noisy-OR
-    # must cap at the 3-agent bound instead of saturating over all 8
+    # 8 crossing agents at an off-peak gap (I_j < 1); top-3 noisy-OR must cap
+    # at the 3-agent bound instead of saturating over all 8
+    one = _empty_scene(v0=8.0)
+    xy, h, v = _crossing_agent_args(t_ego=3.0, gap_s=1.2)
+    _add_agent(one, 0, xy, h, v)
+    i1 = score_sample(one, CFG)["s_inter"]
     s = _empty_scene(v0=8.0)
     for i in range(8):
-        _add_agent(s, i, (15.0 + 0.1 * i, 0.5), 0.0, 8.0)
-    one = _empty_scene(v0=8.0)
-    _add_agent(one, 0, (15.0, 0.5), 0.0, 8.0)
-    i1 = score_sample(one, CFG)["s_inter"]
+        xy, h, v = _crossing_agent_args(t_ego=3.0 + 0.02 * i, gap_s=1.2)
+        _add_agent(s, i, xy, h, v)
     i8 = score_sample(s, CFG)["s_inter"]
     assert 0.0 < i1 < 1.0
-    assert i8 <= 1.0 - (1.0 - i1) ** 3 + 1e-9
+    # near-identical agents: top-3 bound with slack for the slight stagger
+    assert i8 <= 1.0 - (1.0 - i1) ** 3 + 0.05
     assert i8 < 1.0
 
 

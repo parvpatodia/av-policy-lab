@@ -24,12 +24,16 @@ from typing import Dict, Optional
 import numpy as np
 
 # fixed constants (F4_SPEC; every one of these enters the sensitivity grid)
+# v1.1 (2026-06-11, ADR-016): the lead-following headway branch is REMOVED.
+# Gate data over 5,604 scenarios showed it rewards plain car-following
+# (following_lane_with_lead scored above the pre-registered high types);
+# a lead at mid-headway is longitudinal regulation, not a yield-or-go
+# decision. Only path-crossing PrET events and the stationary-pedestrian
+# override remain in S_inter.
+F4_VERSION = "1.1"
 PRET_CENTER_S = 2.5
 PRET_WIDTH_S = 1.5
-TAU_CENTER_S = 1.5
-TAU_WIDTH_S = 1.0
-ALONG_PATH_CUTOFF_M = 30.0   # ~ center + 3 sigma at v0 >= 6 m/s
-LATERAL_GATE_M = 3.0         # agent must be on the corridor to count as lead
+LATERAL_GATE_M = 3.0         # used by the red-light suppressor proximity test
 PED_SPEED_MS = 0.5
 PED_CROSSWALK_DIST_M = 3.0
 PED_OVERRIDE = 0.5
@@ -105,23 +109,6 @@ def _roll_along(path: np.ndarray, speed: float, horizon_s: float,
     want = np.minimum(speed * t, s[-1])
     pts = np.stack([np.interp(want, s, path[:, 0]), np.interp(want, s, path[:, 1])], axis=1)
     return pts, t
-
-
-def _project_along(path: np.ndarray, point: np.ndarray) -> tuple:
-    """(along-path arclength, lateral distance) of point's projection."""
-    best = (math.inf, math.inf)
-    s = _arclengths(path)
-    for i in range(len(path) - 1):
-        d = path[i + 1] - path[i]
-        L2 = float(d @ d)
-        if L2 < 1e-12:
-            continue
-        u = float(np.clip((point - path[i]) @ d / L2, 0.0, 1.0))
-        proj = path[i] + u * d
-        lat = float(np.linalg.norm(point - proj))
-        if lat < best[1]:
-            best = (float(s[i] + u * math.sqrt(L2)), lat)
-    return best
 
 
 # ---------- sample denormalization ----------
@@ -213,11 +200,6 @@ def s_inter(d: Dict, dn: DenormConfig) -> float:
         if cross is not None:
             gap = abs(cross[0] - cross[1])  # PrET / time advantage, NOT PET
             I_j = math.exp(-(((gap - PRET_CENTER_S) / PRET_WIDTH_S) ** 2))
-        else:
-            along, lat = _project_along(full_path, st["xy"])
-            if lat < LATERAL_GATE_M and 0.0 < along < ALONG_PATH_CUTOFF_M:
-                tau = along / max(d["v0"], 1.0)
-                I_j = math.exp(-(((tau - TAU_CENTER_S) / TAU_WIDTH_S) ** 2))
         if st["is_ped"] and st["v"] < PED_SPEED_MS:
             if _ped_near_crossing_crosswalk(st["xy"], d, full_path):
                 I_j = max(I_j, PED_OVERRIDE)

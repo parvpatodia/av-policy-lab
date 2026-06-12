@@ -144,3 +144,12 @@ A second failure mode followed: ~/.local pip packages shadowed the conda env
 sbatch asserts its env can import its deps AND see its hardware before
 starting. Silent fallback is treated as a bug class, not a config nit.
 
+## ADR-016 — F4 v1.1: drop headway branch and S_lane after gate failure (2026-06-11)
+The validation gates ran over all 5,604 scenarios BEFORE any model comparison
+and failed (17% on gate 1). Three causes, all data-diagnosed: pre-registered
+high types absent from mini; S_lane saturated by Vegas multi-lane roadblocks
+(69% at ceiling, F4 floored at 0.5); headway branch scoring car-following as
+ambiguity. v1.1 removes the headway branch, demotes S_lane to a covariate,
+and re-registers the gate lists against mini's actual type inventory.
+Revision happened pre-unblinding; the moderator firewall holds. Spec sec. 7.
+
