@@ -963,32 +963,32 @@ class SceneFeatureExtractor:
         n_hist = cfg.history_steps
         horizon_s = (n_hist - 1) * cfg.dt  # past window excluding current step
 
-        # --- current ego defines the ego frame ---
-        current_ego = scenario.get_ego_state_at_iteration(iteration)  # [VERIFIED]
-        transform = EgoFrameTransform(
-            current_ego.rear_axle.x, current_ego.rear_axle.y, current_ego.rear_axle.heading
+        # --- gather raw histories from the scenario (offline adapter) ---
+        # WHY per-iteration queries, not get_*_past_trajectory: the simulator
+        # hands the planner exact consecutive per-iteration states; the
+        # devkit's batched past-sampling resamples timestamps differently and
+        # broke the train/serve parity gate (max feature diff 1.9). Offline
+        # MUST query the same way serving receives.
+        ego_states, per_step_tracks = [], []
+        for it in range(max(0, iteration - n_hist + 1), iteration + 1):
+            ego_states.append(scenario.get_ego_state_at_iteration(it))
+            per_step_tracks.append(scenario.get_tracked_objects_at_iteration(it))
+        traffic_lights = list(
+            scenario.get_traffic_light_status_at_iteration(iteration)  # [VERIFIED]
         )
+        try:
+            route_ids = list(scenario.get_route_roadblock_ids())  # [VERIFIED]
+        except Exception:
+            route_ids = []
 
-        # --- ego history (oldest -> newest, length n_hist incl. current) ---
-        past_ego = list(
-            scenario.get_ego_past_trajectory(  # [VERIFIED]
-                iteration, time_horizon=horizon_s, num_samples=n_hist - 1
-            )
+        feats, transform, current_ego = self.build_input_features(
+            ego_states,
+            per_step_tracks,
+            traffic_lights,
+            route_ids,
+            scenario.map_api,
         )
-        ego_states = self._normalize_history_length(past_ego + [current_ego], n_hist)
-        ego = self._ego_builder.build(ego_states, transform)
-
-        # --- agent history ---
-        past_tracks = list(
-            scenario.get_past_tracked_objects(  # [VERIFIED]
-                iteration, time_horizon=horizon_s, num_samples=n_hist - 1
-            )
-        )
-        current_tracks = scenario.get_tracked_objects_at_iteration(iteration)  # [VERIFIED]
-        per_step_tracks = self._normalize_history_length(
-            past_tracks + [current_tracks], n_hist
-        )
-        agents, agent_mask = self._agent_builder.build(per_step_tracks, transform)
+        ego, agents, agent_mask = feats["ego"], feats["agents"], feats["agent_mask"]
 
         # --- ego future (training target), ego frame at t=0 ---
         # WHY raise on short futures: extract_scenario catches per-iteration
@@ -1020,24 +1020,7 @@ class SceneFeatureExtractor:
             [fut_xy, fut_h[:, None]], axis=1
         ).astype(np.float32)  # (future_steps, 3)
 
-        # --- map + route + traffic lights ---
-        traffic_lights = list(
-            scenario.get_traffic_light_status_at_iteration(iteration)  # [VERIFIED]
-        )
-        try:
-            route_ids = list(scenario.get_route_roadblock_ids())  # [VERIFIED]
-        except Exception:
-            # [UNVERIFIED — confirm in env] not all scenario builders populate route ids.
-            route_ids = []
-        map_feats = self._map_builder.build(
-            scenario.map_api,  # [VERIFIED] AbstractScenario.map_api
-            (current_ego.rear_axle.x, current_ego.rear_axle.y),
-            route_ids,
-            traffic_lights,
-            transform,
-        )
-
-        sample = {"ego": ego, "agents": agents, "agent_mask": agent_mask, "ego_future": ego_future, **map_feats}
+        sample = {**feats, "ego_future": ego_future}
         self._assert_sample_consistency(sample)
         # WHY identifiers: F4 scoring, per-type validation gates, and joining
         # offline scores to closed-loop runs all need to know which scenario a
@@ -1047,6 +1030,46 @@ class SceneFeatureExtractor:
         sample["log_name"] = str(scenario.log_name)
         sample["iteration"] = int(iteration)
         return sample
+
+    def build_input_features(
+        self,
+        ego_states: list,
+        per_step_tracks: list,
+        traffic_lights: list,
+        route_ids: list,
+        map_api,
+    ):
+        """Shared feature core: raw histories -> model input tensors.
+
+        WHY one code path: train/serve feature skew is the classic silent
+        killer in learned planning stacks. The offline extractor (scenario
+        adapter, extract_sample) and the sim-time planner (PlannerInput
+        adapter, nuplan/serving/policy_planner.py) BOTH call this function,
+        so parity holds by construction; nuplan/serving/parity_check.py
+        verifies it numerically on real scenarios.
+
+        Args are oldest->newest; the last entry of each history is "now".
+        Returns (feature dict WITHOUT label/identifiers, transform, current_ego).
+        """
+        cfg = self._cfg
+        n_hist = cfg.history_steps
+        current_ego = ego_states[-1]
+        transform = EgoFrameTransform(
+            current_ego.rear_axle.x, current_ego.rear_axle.y, current_ego.rear_axle.heading
+        )
+        ego_states = self._normalize_history_length(list(ego_states), n_hist)
+        ego = self._ego_builder.build(ego_states, transform)
+        per_step_tracks = self._normalize_history_length(list(per_step_tracks), n_hist)
+        agents, agent_mask = self._agent_builder.build(per_step_tracks, transform)
+        map_feats = self._map_builder.build(
+            map_api,
+            (current_ego.rear_axle.x, current_ego.rear_axle.y),
+            list(route_ids),
+            list(traffic_lights),
+            transform,
+        )
+        feats = {"ego": ego, "agents": agents, "agent_mask": agent_mask, **map_feats}
+        return feats, transform, current_ego
 
     @staticmethod
     def _normalize_history_length(items: list, n: int) -> list:
