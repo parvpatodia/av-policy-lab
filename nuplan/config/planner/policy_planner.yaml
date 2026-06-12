@@ -1,0 +1,8 @@
+policy_planner:
+  _target_: serving.policy_planner.PolicyPlanner
+  ckpt_path: ???
+  head_type: ???
+  goal_mode: ???
+  num_samples: 8
+  ddim_steps: 20
+  device: cpu

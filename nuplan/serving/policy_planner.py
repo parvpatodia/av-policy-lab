@@ -100,7 +100,10 @@ def select_medoid(samples: torch.Tensor) -> torch.Tensor:
 class PolicyPlanner(AbstractPlanner):
     """Serves one trained cell of the 2x2 inside nuPlan closed-loop sim."""
 
-    requires_scenario: bool = False
+    # WHY True: the devkit's planner builder passes scenario= to the
+    # constructor only when this class attribute is set; the precise-goal
+    # condition needs the log future, and route mode simply ignores it.
+    requires_scenario: bool = True
 
     def __init__(
         self,
