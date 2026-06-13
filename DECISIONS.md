@@ -202,3 +202,21 @@ BUDGET CORRECTION: two_stage_controller costs ~7.5 min/scenario, not the
 SLURM array (split tokens across array tasks), never serial. Eval manifest is
 frozen and committed before unblinding (token list -> scenario_tokens filter).
 
+## ADR-019 — Eval manifest: 4-band F4 stratification, frozen and hashed (2026-06-12)
+The eval scenario set is frozen before unblinding (nuplan/eval/freeze_manifest.py
+-> manifest.json with token list, per-band counts, SHA256, git commit).
+Sharded eval runs it via nuplan/slurm/eval_array.sbatch (array = cell x shard,
+tokens[shard::N]).
+
+Stratification is over 4 F4 BANDS {zero, low(0,1/3], med(1/3,2/3], high(2/3,1]},
+NOT deciles. A dry run exposed the trap: 60% of scenarios score F4 == 0 exactly,
+so equal-count deciles collapse (bottom 6 deciles all [0,0]) and the eval set
+would have contained zero low-ambiguity anchor scenarios, silently biasing the
+moderation. Equal allocation per band (125 each at n=500) is a balanced-X
+design: selection on the regressor F4 does not bias the OLS slope and maximizes
+its precision via leverage at the extremes. Caveat recorded: marginal mean Delta
+and intercept are then NOT population-representative; the analysis is
+slope-focused (the hypothesis is about how the gap scales with ambiguity), and
+a separate population-weighted mean Delta can be computed post hoc by reweighting
+bands to natural frequency if a marginal estimate is needed.
+
