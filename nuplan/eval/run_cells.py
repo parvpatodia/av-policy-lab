@@ -54,6 +54,10 @@ def build_cfg(args, exp_name: str):
         f"ego_controller={args.controller}",
         f"observation={'idm_agents_observation' if args.reactive else 'box_observation'}",
         "simulation_metric=prod_eval_metrics",
+        # WHY drop metric_summary_callback: it exists only to render bokeh
+        # histogram PDFs and bokeh 2.4 is incompatible with this env numpy;
+        # CLS numbers come from metric_file + aggregator parquets.
+        "main_callback=[time_callback,metric_file_callback,metric_aggregator_callback]",
         f"hydra.searchpath=[{paths.common_dir}, {paths.experiment_dir}, file://{REPO_CONFIG_DIR}]",
         "output_dir=${group}/${experiment}",
         "scenario_builder=nuplan_mini",

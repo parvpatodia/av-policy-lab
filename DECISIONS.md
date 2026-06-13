@@ -180,3 +180,25 @@ Four changes, each closing an audit finding, all in one re-extraction (f0_v3):
    lists will be re-run against the enriched inventory; the original
    pre-registered high types become evaluable after all.
 
+## ADR-018 — Closed-loop harness validated end-to-end; eval budget corrected (2026-06-12)
+The full verdict pipeline runs: PolicyPlanner -> nuPlan two_stage_controller
+sim -> prod_eval_metrics -> aggregator CLS, parsed by
+nuplan/analysis/analyze_moderation.py (paired Delta, OLS+HC3, Spearman,
+Theil-Sen, bootstrap CI; 11 unit tests against known constructions).
+Env required pip installs (pytorch_lightning, ray, pyarrow, etc.); the
+bokeh-dependent metric_summary_callback is dropped via main_callback override
+(bokeh 2.4 vs this env's numpy is broken) — CLS comes from the metric_file +
+aggregator parquets, which are unaffected.
+
+Validation, brutally checked: a stationary-only smoke is uninformative (reward
+for not moving). The non-stationary smoke (high_magnitude_speed, expert
+progress 113-175 m) showed the policy drives at 0.93-0.95 of expert progress
+(NOT degenerate) and CLS discriminated clean runs (~0.99) from drivable-area
+failures (~0.62). Harness is scientifically valid.
+
+BUDGET CORRECTION: two_stage_controller costs ~7.5 min/scenario, not the
+1-3 min estimated in the audit. Consequence: a 500-scenario eval per cell is
+~62 CPU-h; 4 cells x 2 agent modes ~500 CPU-h. MUST run as a scenario-sharded
+SLURM array (split tokens across array tasks), never serial. Eval manifest is
+frozen and committed before unblinding (token list -> scenario_tokens filter).
+
