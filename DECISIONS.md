@@ -251,3 +251,17 @@ Tested: guard fires in 1.0s on a 10s hang, no lingering alarm, 173 tests green.
 This is the standard production pattern (no single pathological input may stall
 a batch job); it should have been in v1.
 
+## ADR-022 — v3 training data frozen at 722 shards; 12 cells in 2 waves (2026-06-14)
+Task 14's last shard (1 of ~16/task) never regenerated cleanly before a 4-day
+cluster maintenance window (mapo-2026, 2026-06-15..19, 765 nodes). Rather than
+block 12-cell GPU training on 0.14% of data (~600/440k samples) AND risk a
+fairness violation (if the shard landed mid-training, staggered array cells
+would glob different shard sets and different train/val splits), the dataset is
+FROZEN at the verified 722 shards. task14 resubmit cancelled; its 14 valid
+shards are kept. Fairness (identical data across all cells) over completeness.
+The frozen set includes task_0016 (perturbed junction enrichment, 59 shards).
+GPU QOS caps 8 submitted / 4 running, so the 12 cells (4 x 3 seeds) run in
+2 waves: wave 1 = array 0-7 (seeds 0,1), wave 2 = 8-11 (seed 2) when slots
+free. Data freeze makes wave staggering fairness-safe. All HPC compute (train
+7715872, f4enrich2 7712443) is queued for after maintenance ends 2026-06-19.
+
