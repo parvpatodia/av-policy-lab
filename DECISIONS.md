@@ -237,3 +237,17 @@ Checkpoint and any derived weights are never committed to this repo (nuPlan
 non-commercial license; cite Hagedorn et al. 2025). The shgd95 collaboration
 repo is read-only to us; nothing is pushed there without Parv's review.
 
+## ADR-021 — Per-iteration timeout guard in extraction (2026-06-13)
+v3 job 7626090 task 14 wrote 15 shards then HUNG ~20h on a single scenario
+(stuck inside the devkit map queries; a hang is not a Python exception, so
+the existing per-iteration try/except could not catch it). It silently blocked
+the v3 completion gate while holding a CPU allocation doing nothing.
+Fix: a SIGALRM wall-clock budget (FeatureConfig.iteration_timeout_s=90, main
+thread / Sequential worker) wraps each extract_sample; a hang becomes a
+catchable _IterationTimeout and that one frame is skipped, the job continues.
+0 disables (tests). Recovery: scancel the element, resubmit just --array=14;
+shard-level resume skips the 15 written shards, the guard skips the bad frame.
+Tested: guard fires in 1.0s on a 10s hang, no lingering alarm, 173 tests green.
+This is the standard production pattern (no single pathological input may stall
+a batch job); it should have been in v1.
+

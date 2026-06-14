@@ -74,6 +74,10 @@ class FeatureConfig:
     # goals (F2) and imitation supervision (F3/F4) all derive from this field.
     future_steps: int = 16
     future_horizon_s: float = 8.0
+    # WHY: per-iteration wall-clock budget; a single scenario that hangs inside
+    # the devkit is skipped rather than stalling the whole job (job 7626090
+    # task 14 hung ~20h on one scenario). 0 disables (tests).
+    iteration_timeout_s: int = 90
 
     # --- agents ---
     max_agents: int = 32             # nearest-N kept; pad/truncate to this
@@ -998,6 +1002,37 @@ class MapFeatureBuilder:
 # Orchestrator
 # ===========================================================================
 
+
+class _IterationTimeout(Exception):
+    """Raised when a single scenario iteration exceeds its wall-clock budget."""
+
+
+def _timeout_guard(seconds: int):
+    """Context-manager-ish via signal.alarm; main-thread only (Sequential
+    worker). WHY: a single pathological scenario can hang inside the devkit
+    (map queries deadlock / infinite loop), and a hang is NOT an exception, so
+    try/except cannot catch it. SIGALRM converts the hang into a catchable
+    TimeoutError so extract_scenario skips it instead of stalling an 8h job
+    (observed: job 7626090 task 14 hung ~20h on one scenario after 15 shards)."""
+    import signal
+
+    class _G:
+        def __enter__(self):
+            self._old = signal.signal(signal.SIGALRM, self._raise)
+            signal.alarm(seconds)
+            return self
+
+        def __exit__(self, *a):
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, self._old)
+
+        @staticmethod
+        def _raise(signum, frame):
+            raise _IterationTimeout(f"iteration exceeded {seconds}s")
+
+    return _G()
+
+
 class SceneFeatureExtractor:
     """Walks a nuPlan scenario, builds per-sample feature dicts, saves .pt shards.
 
@@ -1230,11 +1265,16 @@ class SceneFeatureExtractor:
         """Extract every valid iteration of a scenario (with full history)."""
         n_iter = scenario.get_number_of_iterations()  # [VERIFIED]
         start = self._cfg.history_steps - 1
+        budget = self._cfg.iteration_timeout_s
         samples: List[Dict[str, np.ndarray]] = []
         for it in range(start, n_iter, stride):
             try:
-                samples.append(self.extract_sample(scenario, it))
-            except Exception as exc:  # WHY: one bad frame must not abort a multi-hour run.
+                if budget > 0:
+                    with _timeout_guard(budget):
+                        samples.append(self.extract_sample(scenario, it))
+                else:
+                    samples.append(self.extract_sample(scenario, it))
+            except (Exception, _IterationTimeout) as exc:  # bad/hung frame -> skip
                 logger.warning("skip %s it=%d: %s", getattr(scenario, "token", "?"), it, exc)
             if max_samples is not None and len(samples) >= max_samples:
                 break

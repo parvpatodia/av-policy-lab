@@ -243,3 +243,24 @@ def test_config_dimensions():
     assert cfg.map_feature_dim == 7
     assert cfg.route_points == 40
     assert cfg.dt == pytest.approx(0.1, abs=1e-12)
+
+
+def test_iteration_timeout_guard_fires_and_cleans_up():
+    """A hang inside extraction must convert to a catchable timeout, not stall.
+    REF: job 7626090 task 14 hung ~20h on one scenario."""
+    import signal
+    import time
+    from features.scene_features import _timeout_guard, _IterationTimeout
+
+    t0 = time.time()
+    fired = False
+    try:
+        with _timeout_guard(1):
+            time.sleep(5)
+    except _IterationTimeout:
+        fired = True
+    assert fired and (time.time() - t0) < 3
+    # fast work is untouched and no alarm lingers
+    with _timeout_guard(5):
+        _ = sum(range(100))
+    assert signal.alarm(0) == 0
