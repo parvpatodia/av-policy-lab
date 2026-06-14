@@ -1,194 +1,97 @@
 # av-policy-lab
 
-Closed-loop driving policy learning in simulation. Three baselines trained on the [nuPlan](https://nuplan.org) dataset, evaluated with a reproducible open-loop and closed-loop harness.
+A controlled study of when generative (diffusion) planners actually beat
+deterministic ones on the [nuPlan](https://nuplan.org) closed-loop benchmark,
+and whether that conclusion survives realistic background traffic.
 
-**Status:** BC + DAgger + BEV CNN + MILE world model built. Closed-loop eval for DAgger iter 2, BEV, MILE pending (run notebooks).
+MS research project, Northeastern University. Work in progress; this README
+states exactly what is done, what is running, and what is not built yet.
 
----
+## The question
 
-## What this is
+The field justifies diffusion planners with "driving is multimodal," but
+rarely measures the multimodality or checks whether the conclusion depends on
+the simulator. In an earlier phase of this repo, a capacity-matched diffusion
+head and a deterministic MLP head TIED (avg displacement 27.59 m vs 27.55 m,
+Wilcoxon p = 0.79) when both were conditioned on a precise future goal point.
+The precise goal removed the ambiguity, and with it any reason for the
+generative head to win. That null result became the design for the real
+experiment.
 
-This repo benchmarks three imitation learning approaches on the nuPlan mini dataset:
+## The experiment
 
-1. **Behavior Cloning (BC)** — MLP that maps ego state to a 16-step future trajectory. Pure imitation, no world model.
-2. **DAgger (Ross et al. 2011)** — dataset aggregation fix for BC covariate shift. Runs policy closed-loop, collects (visited state, expert label) pairs, retrains iteratively.
-3. **BEV CNN** — replaces 6-dim scalar state with a top-down rasterized ego-history image (3×64×64). CNN encoder + state MLP + trajectory head. Adds spatial temporal context.
-4. **MILE-style world model** — encoder (6→64 latent) + GRU world model + policy, trained with joint imitation + consistency loss. Based on [MILE (Hu et al., 2022)](https://arxiv.org/abs/2209.14430).
+Train four identical-capacity models that differ only along two axes, then
+evaluate closed-loop:
 
-The goal is not to beat SOTA. The goal is to execute three baselines cleanly, document where each one fails, and produce an evaluation framework an AV team would actually find useful.
-
----
-
-## Why nuPlan
-
-nuPlan uses 1200+ hours of real Motional driving logs across Las Vegas, Boston, Pittsburgh, and Singapore. It has reactive agents built in, a standardized closed-loop simulation API, and a published scoring metric (PDM-Score) that accounts for comfort, progress, and collision avoidance simultaneously. CARLA requires building all of that infrastructure from scratch.
-
----
-
-## Results
-
-### Open-loop (ADE / FDE on nuPlan mini val split)
-
-Evaluated on 2,000 randomly sampled windows from the held-out val split (80/10/10 split, seed 42). All planners receive the same initial ego state.
-
-| Policy | ADE (m) | FDE (m) | Notes |
-|---|---|---|---|
-| BC MLP | 0.058 | 0.063 | 6→256→256→256→48, 260K windows |
-| IDM (free-road) | 3.898 | 7.871 | Treiber 2000, V0=15 m/s |
-| Constant velocity | 3.205 | 6.030 | vx/vy extrapolated |
-| BEV CNN | 0.051 | 0.059 | 3×64×64 ego-history + 6-dim state, ~370K params; LR decayed 1e-3→2.5e-4 |
-| MILE world model | 0.060 | 0.068 | encoder+GRU+policy, ~73K params; L_cons=0.006 (converged) |
-
-### Closed-loop — single-log 3-scenario eval (Phase 1–3c)
-
-Controller: `perfect_tracking_controller`. Observation: `box_observation`. Same 3 scenarios, 1 log.
-
-| Policy | Avg L2 (m) | Max L2 (m) | p90 L2 (m) | Notes |
-|---|---|---|---|---|
-| BCPlanner (v0) | 49.449 | 104.614 | 91.526 | pure imitation |
-| BCPlanner (v2, DAgger iter 2) | 49.486 | 104.689 | 91.593 | 12,678 samples — **no improvement** |
-| BEVPlanner | 49.410 | 104.543 | 91.416 | –0.08% vs BC_v0 — spatial history irrelevant at drift scale |
-| MILEPlanner | 49.565 | 104.834 | 91.723 | world model adds no recovery |
-| IDMPlanner | **6.285** | **24.308** | **15.733** | reactive, no learning |
-| **GoalBCPlanner** | **1.820** | **2.944** | **2.646** | **–96.3% vs BC_v0** — oracle (requires expert DB at inference) |
-| MapBCPlanner | 56.326 | 108.124 | 98.831 | local map query fails off-road |
-| RouteMapBCPlanner (8m fixed) | 32.085 | 77.952 | 48.596 | global route — 35% better than BC; wrong goal scale |
-| TrainedRouteBCPlanner | 49.034 | 101.902 | 89.021 | retrained on 8m goals — goal ignored (12× horizon) |
-| **SpeedAdaptiveRouteMapBC** | **13.697** | **23.725** | **19.842** | **speed×0.8 look-ahead — 57% better than RouteMapBC** |
-
-### Closed-loop — 30-scenario diverse eval (Phase 3c'', `eval_production.py`)
-
-30 scenarios sampled from all 64 nuPlan mini logs. `eval_production.py`. Run: May 28 2026.
-
-| Policy | Mean | Median | Trim-4 mean | p90 | Std | Fail >20m | Good <5m |
-|---|---|---|---|---|---|---|---|
-| **RoadblockRouteMapBC** (3c''') | 17.00m | **7.50m** | **7.57m** | **31.71** | 27.71 | 6/30 | 12/30 |
-| SpeedAdaptiveRouteMapBC (3c'') | 18.19m | 7.50m | 7.81m | 58.16 | 28.57 | 6/30 | 12/30 |
-| IDMPlanner | 13.97m | 8.50m | 9.08m | 28.68 | 16.26 | 8/30 | 12/30 |
-| DualHorizonRouteMapBC (3c''''') | 27.55m | 16.55m | — | 71.91 | 28.28 | 14/30 | 12/30 |
-| BCPlanner | 27.18m | 16.99m | — | — | 28.19 | 14/30 | 12/30 |
-| RouteMapBCPlanner | 47.36m | 53.57m | — | — | 25.43 | 26/30 | 0/30 |
-
-**GoalBC oracle: 1.820m** (3-scenario single-log — not re-run in production eval to avoid per-scenario DB mismatch).
-
-**Honest statistical reading (`statistical_analysis.py`):** SpeedAdaptive is **statistically TIED with IDM** on L2 (binomial p=0.585, Wilcoxon p=0.761, median-diff 95% CI [−10.3, +6.4] includes zero). Deficit concentrated in 4 scenarios carrying 63% of total L2 mass — intersection turns where the centerline goes straight while the expert turns.
-
-**Phase 3c''''' (DualHorizonRouteMapBC) — the decisive result: a single deterministic policy cannot serve both regimes.** Adding a far-preview goal (20m, where turns are visible) to the near goal **fixed the exact intersection turns that broke SpeedAdaptive** — scen_0018 85.3→**0.0m**, scen_0000 55.7→**0.4m**, scen_0011 80.3→33.7m — proving the turn information is *usable* by the MLP. But it simultaneously **broke straight scenarios SpeedAdaptive nailed** — scen_0013 3.1→**74m**, scen_0025 0.8→**47m**, scen_0006 1.3→61m (14 improved, 16 regressed; mean 27.55m, worse). The PDM profile is the fingerprint of mode-hedging: **best-in-class comfort (1.00 vs IDM 0.63), collisions (0.90), drivable-area (0.90), direction (1.00) — but worst progress (0.40 vs 0.80)**. Conditioned to anticipate a far turn, the deterministic policy over-applies it on straights and under-commits everywhere, driving smoothly/safely but failing to make progress. **Conclusion (airtight, data-isolated): turn information is necessary AND a single deterministic regressor is insufficient to use it conditionally — it averages the turn/straight modes. This is the textbook motivation for a multi-modal action policy → Phase 3d Diffusion Policy.**
-
-**Phase 3c''' (RoadblockRouteMapBC) — a correct goal is necessary but not sufficient.** Using `route_roadblock_ids` to pick the junction branch **changed the route on 28/30 scenarios** (so the mechanism genuinely fires — not a silent fallback). It is **statistically tied with its parent** (Wilcoxon p=0.808, mean 17.0 vs 18.2m), but the per-scenario effect is the real finding: **15 scenarios improved, 13 regressed.** Where the corrected route matched a turn the policy could execute, it fixed the scenario dramatically (scen_0000: 55.7→**4.1m**, eliminating one of four catastrophic failures, p90 58→32m). But where the corrected route pointed into a turn, the policy — trained on near-straight expert goals — could not track it and *regressed* (scen_0022: 1.1→**15.5m**). **The bottleneck has moved from goal *representation* (global route + speed-matched scale + correct branch — now solved) to policy *execution of turns*.** The deterministic MLP regresses turn-vs-straight decisions to the mean; a correct turn-goal is out-of-distribution for it. This is the precise, data-isolated motivation for Phase 3d (multi-modal Diffusion Policy) and/or retraining with route goals that include turns.
-
-### Closed-loop — PDM-Score (driving quality, `pdm_score.py`)
-
-PDM-Score (Dauner et al. 2023) is nuPlan's official metric: a multiplicative product of safety/compliance penalties times a weighted average of progress, time-to-collision, speed-limit, and comfort. L2 measures deviation; PDM-Score measures whether the policy actually *drives well*.
-
-| Planner | **PDM-Score** | no-collision | drivable-area | TTC | progress | **comfort** |
-|---|---|---|---|---|---|---|
-| IDMPlanner | **0.656** | 0.850 | 0.833 | 0.767 | 0.900 | 0.633 |
-| SpeedAdaptiveRouteMapBC | 0.526 | 0.667 | 0.767 | 0.600 | 0.800 | **0.833** |
-| RouteMapBCPlanner | 0.342 | 0.600 | 0.533 | 0.567 | 0.867 | 0.467 |
-
-**The key research finding — a comfort/safety trade-off.** On the official metric IDM still wins overall (0.656 vs 0.526). But the components tell a precise story: the learned policy drives **more comfortably than the rule-based planner** (comfort 0.833 vs 0.633 — smoother, more human-like acceleration/jerk), while **trading away safety margin** — more at-fault collisions (0.667 vs 0.850), worse time-to-collision (0.600 vs 0.767), more drivable-area excursions (0.767 vs 0.833). Critically, the safety deficit lines up exactly with the L2 tail: the 4 intersection failures manifest as collisions and off-road excursions, not as discomfort. This makes the contribution sharper than L2 alone: **a learned, deploy-time-only policy produces more comfortable trajectories than IDM and its remaining gap is a localized safety failure at intersections** — precisely what `RoadblockRouteMapBCPlanner` (Phase 3c''', `route_roadblock_ids`) targets. Confirmed: route_roadblock_ids is populated on all 30/30 mini scenarios (mean 27.8 ids), so the fix has real route data to act on.
-
-**Key finding — covariate shift:** BC achieves 0.058m open-loop ADE (predicting from ground-truth states) but 49.4m closed-loop L2 (850x worse). Error compounds at every step because the model was never trained on states it caused itself.
-
-**BEV CNN closed-loop:** 49.410m avg L2 vs BC_v0 49.449m — 0.08% improvement, essentially zero. The ego-history rasterization captures where the ego *has been*, not where the road *is*. Once the ego drifts 50m off-track, the 64×64 ego-centered window shows the ego's own off-road trajectory history — no road geometry, no recovery signal. Open-loop ADE improved (0.051m vs 0.058m for BC) because BEV adds useful short-horizon context from ground-truth states. Closed-loop that advantage evaporates immediately when off-distribution states begin.
-
-**MILE world model closed-loop:** 49.565m avg L2 — 0.2% *worse* than BC_v0. The GRU world model trained to minimize consistency loss between adjacent latent states. In distribution this works; in severe compounding drift the latent state encodes nonsense (no training examples for 50m off-track states) and the policy head produces arbitrary outputs. The consistency loss did not act as a regularizer sufficient to prevent off-distribution collapse.
-
-**DAgger iter 2 failure (architectural limit):** 12,678 on-policy samples (4.6%) — BC_v2 val loss improved (0.245→0.243) but closed-loop L2 unchanged (49.449→49.486m, ~0%). Root cause: the MLP policy (6-dim state) cannot perceive where it is relative to the road. More data doesn't fix perception.
-
-**Central finding (Phase 2):** all three architecture variants (BC MLP, BEV CNN, MILE world model) plateau at ~49.4–49.6m closed-loop L2. IDM (6.285m) wins by 8×. Lesson: representation does not fix perception absence.
-
-**Central finding (Phase 3a — GoalBC):** Adding a 2D goal waypoint (T+8 expert position in ego-frame) to the 6-dim input reduces closed-loop L2 from 49.486m → **1.820m — a 96.3% reduction**. GoalBC (1.820m) is **3.5× better than IDM** (6.285m). The MLP policy was never the bottleneck — it was operating without any spatial reference to the road. The 6-dim kinematic state looks identical whether the ego is on-road or 50m off-track. Two extra dimensions of goal information completely breaks the plateau.
-
-**Phase 3b (MapBC) finding — the drift bootstrapping problem:** MapBC replaces the expert T+8 goal with a road centerline look-ahead from the HD map. Both naive (v1, nearest-lane) and heading-aligned (v2) selection score 56.326m — worse than BC_v0. Root cause: once the ego accumulates 2–3m of compounding drift, `get_proximal_map_objects(radius=30m)` returns zero lanes and the planner falls back to straight-ahead. The map query is only useful *on the road*; it fails for recovery. GoalBC succeeds because the expert's T+8 position is valid regardless of where the ego currently is — it's a global reference. The map query is a local reference that breaks under the very drift it's supposed to fix.
-
-**Phase 3c (RouteMapBC) finding — train/inference distribution mismatch:** Pre-computing a 200m route at scenario start and tracking it globally (IDM-style) fixes the drift bootstrapping problem: RouteMapBC (32.085m) is 35% better than BC_v0 and 43% better than MapBC. However, it is still 17.6× worse than GoalBC (1.820m). The gap is not a route construction failure — it is a **train/inference mismatch**. GoalBC weights were trained exclusively on expert T+8 goals, where the goal encodes actual intended trajectory (speed, lane change, turn geometry). A route centerline 8m ahead has systematically different statistics: it always points forward, ignores traffic intent, and never encodes turn geometry. The policy learned to interpret goal offsets as "where the expert will be in 0.8s" — feeding it a road centerline violates that learned mapping. Fix: retrain with route-based goals at training time (TrainedRouteBC, Phase 3c').
-
-**Implication for Phase 3d:** a deployable goal source needs to be used at BOTH training time and inference time. GoalBC proves the policy capacity is sufficient — the bottleneck is now goal-source consistency. TrainedRouteBC: replace expert T+8 lookup with route-goal lookup in the training data pipeline, retrain, redeploy.
-
-**Phase 3c'' (SpeedAdaptiveRouteMapBC) — scale fix confirmed:** `GoalBCPlanner._get_expert_at_offset` uses `offset_steps × 100ms = T+0.8s`. The nuPlan mini DB is at 100Hz (10ms/row), so training T+8 goals ≈ 0.35m average. RouteMapBC's fixed 8m look-ahead was 23× the training scale. `SpeedAdaptiveRouteMapBCPlanner` sets `look_ahead = max(0.05, speed × 0.8)`, matching the GoalBC inference temporal horizon at every speed. 3-scenario result: 32.085m → 13.697m (57% reduction). 30-scenario median: 7.50m (beats IDM 8.50m). **Tail failures** (4/30 scenarios, L2 > 55m) reveal the intersection topology problem: route centerline follows straight while expert turns. Fix: use `route_roadblock_ids` from `PlannerInitialization` to guide lane selection at intersections.
-
----
-
-## Repo layout
-
-```
-av-policy-lab/
-├── nuplan/
-│   ├── bc_pipeline.ipynb     # BC MLP training, ADE/FDE eval, IDM baseline
-│   ├── dagger.ipynb          # DAgger iter 1 (failed) + iter 2 fix (multi-log collection)
-│   ├── bev_cnn.ipynb         # BEV CNN: ego-history rasterizer, CNN encoder, BEVPlanner
-│   ├── mile_policy.ipynb     # MILE world model: encoder + GRU + joint imitation+consistency
-│   ├── closed_loop_eval.py   # Hydra sim harness (BC, IDM, BEV, MILE)
-│   ├── planners.py           # All 8 planner classes (BC, IDM, DAgger, BEV, MILE × Policy+Planner)
-│   └── checkpoints/
-│       ├── bc_best.pt        # BC_v0 (pure imitation, 260K windows)
-│       ├── bc_dagger_v1.pt   # BC_v1 (iter 1, 745 samples — no improvement)
-│       └── bc_dagger_v2.pt   # BC_v2 (iter 2, ~15K samples — run dagger.ipynb Cell 4)
-├── experiments/
-│   └── week0_ddpm_scratch.py # DDPM noise schedule (preliminary)
-├── notes/
-│   └── research-sota-2026-05-01.md
-├── DECISIONS.md              # Architecture and tooling decisions with rationale
-└── README.md
-```
-
----
-
-## Reproduce the BC baseline
-
-**Requirements:** conda, Python 3.9, nuplan-devkit installed
-
-```bash
-# 1. Clone and set up
-git clone https://github.com/parvpatodia/av-policy-lab.git
-cd av-policy-lab
-
-# 2. Activate the nuplan environment
-conda activate nuplan
-
-# 3. Download nuPlan mini dataset
-#    Register at https://nuplan.org, download mini split (~5 GB)
-#    Place DB files at: /path/to/nuplan-devkit/data/cache/mini/
-
-# 4. Open the BC notebook
-jupyter notebook nuplan/bc_pipeline.ipynb
-```
-
-Update `DB_DIR` and `CKPT_DIR` in Cell 2 to match your local paths. Run all cells top to bottom. Training takes ~20 minutes on Apple M-series (MPS).
-
-**What it does:**
-- Extracts ~327K sliding-window samples from 64 SQLite DB files (stride=10, 16-step future horizon)
-- Input: `[sin(yaw), cos(yaw), vx, vy, ax, ay]` — 6 features
-- Output: `(dx, dy, d_yaw) x 16` — ego-frame relative trajectory
-- MLP: 6 → 256 → 256 → 256 → 48, ReLU activations, Adam + ReduceLROnPlateau
-- Eval: ADE / FDE vs. constant-velocity baseline
-- `BCPlanner` class wraps the trained model as a drop-in `AbstractPlanner` for nuPlan simulation
-
----
-
-## Timeline
-
-| Phase | Weeks | Goal |
+|  | route-region goal | precise-point goal |
 |---|---|---|
-| Foundation | 1–4 (May 11 – Jun 7) | nuPlan setup, BC baseline, Karpathy lectures 1–4 |
-| Three baselines | 5–10 (Jun 8 – Jul 19) | BC complete, MILE, VLA, first metrics |
-| Eval + writeup | 11–16 (Jul 20 – Aug 30) | Eval harness, failure analysis, HuggingFace post |
+| **deterministic head** | cell 1 | cell 2 |
+| **diffusion head** | cell 3 | cell 4 |
 
----
+- Hypothesis: the diffusion head wins only under route-region conditioning,
+  and only on scenarios that contain real decision ambiguity.
+- Ambiguity is measured, not assumed: a per-scenario interaction-multimodality
+  score (F4) computed from scene structure alone (lane branching, predicted
+  encroachment gaps, crosswalk geometry). Never from either model's output,
+  so the moderation claim is not circular. Spec with verified citations:
+  [docs/frontier/F4_SPEC.md](docs/frontier/F4_SPEC.md).
+- Third axis (in progress): repeat the comparison with learned reactive
+  background agents (SMART, warm-started from NVIDIA CAT-K checkpoints)
+  instead of rule-based IDM, testing whether the conclusion itself flips.
+  Motivated by Hagedorn et al. (arXiv:2510.14677), who showed IDM agents
+  inflate nuPlan scores and reshuffle planner rankings.
 
-## Papers
+## Status
 
-- Behavior Cloning in AV: [Urban Driver (Scheel et al., 2022)](https://arxiv.org/abs/2109.14480)
-- World-model imitation: [MILE (Hu et al., 2022)](https://arxiv.org/abs/2209.14430)
-- nuPlan benchmark: [Caesar et al., 2021](https://arxiv.org/abs/2106.11810)
-- PDM-Score / closed-loop eval: [Dauner et al., 2023](https://arxiv.org/abs/2306.07962)
+Done and tested:
+- F0: vectorized scene extraction from nuPlan mini. 707 shards, 431,508
+  samples, every sample carries scenario identifiers and an 8 s future label.
+- F1: Wayformer-style scene encoder, 1.03M params, 32 latent queries.
+- F2/F3: goal conditioning + capacity-matched twin heads (5.4% param gap,
+  shared trajectory trunk, x0-parameterized diffusion, cosine schedule).
+- F5: training loop with bit-exact checkpoint resume, DDIM sampler,
+  deterministic train/val shard split. 146 tests pass.
+- F4 (partial): shard-side interaction score components.
 
----
+Running now:
+- The four training cells on HPC GPUs (SLURM array).
 
-## Author
+Not built yet:
+- F4 map-API branching score and the score-to-scenario join.
+- Closed-loop evaluation harness for the trained heads.
+- SMART agent integration (checkpoints in hand, port not started).
 
-Parv Patodia — MS AI, Northeastern University Silicon Valley  
-Prior work: AV validation at Venti Technologies (LiDAR, RViz), diffusion model research  
-GitHub: [parvpatodia](https://github.com/parvpatodia)
+Earlier phases (BC, DAgger, BEV CNN, MILE world model, goal-representation
+ablations) live in the notebooks and [docs/](docs/); their results stand but
+they are not the current contribution.
+
+## Layout
+
+```
+nuplan/features/    F0 extractor, F4 score components
+nuplan/models/      encoder, twin heads, DDIM sampler, shard dataset
+nuplan/training/    train_policy.py (one experiment cell per invocation)
+nuplan/slurm/       extraction / training / verification jobs
+tests/              full suite (run on a compute node: pytest tests/ -q)
+docs/frontier/      specs, decision log, literature reviews
+```
+
+## Reproducing
+
+Requires the nuPlan mini dataset and devkit (see
+[docs/frontier/HPC_NORTHEASTERN.md](docs/frontier/HPC_NORTHEASTERN.md) for the
+cluster setup used here).
+
+```
+pytest tests/ -q                                  # 146 tests
+sbatch nuplan/slurm/extract_features_array.sbatch # F0 extraction (16 tasks)
+python nuplan/slurm/merge_shards.py --strict      # shard verification gate
+sbatch nuplan/slurm/train_policy_array.sbatch     # the 2x2 (4 cells)
+```
+
+## Notes
+
+- SMART checkpoints are WOMD-derived and are NOT redistributed in this repo,
+  per the Waymo Open Motion Dataset license. Thanks to Zhejun Zhang for
+  sharing the CAT-K checkpoints for academic use.
+- Commit convention: type(scope): description. Tests gate every commit.

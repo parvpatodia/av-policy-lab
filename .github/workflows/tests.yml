@@ -1,0 +1,26 @@
+name: tests
+on:
+  push:
+    branches: [frontier-upgrade, main]
+  pull_request:
+
+jobs:
+  cpu-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install CPU deps
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install numpy pytest
+      - name: Run devkit-free suite
+        # planner-geometry and scene-features tests need the nuPlan devkit
+        # and run on the HPC compute nodes instead
+        run: |
+          pytest tests/ -q \
+            --ignore tests/test_planner_geometry.py \
+            --ignore tests/test_scene_features.py
