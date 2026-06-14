@@ -4,7 +4,7 @@
 #SBATCH --job-name=f5-2x2
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
-#SBATCH --array=0-3
+#SBATCH --array=0-11   # 4 cells x 3 seeds (audit: single-seed is unpublishable)
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
 #SBATCH --time=07:55:00
@@ -15,11 +15,14 @@ set -euo pipefail
 
 HEADS=(det det diff diff)
 GOALS=(route precise route precise)
-HEAD="${HEADS[$SLURM_ARRAY_TASK_ID]}"
-GOAL="${GOALS[$SLURM_ARRAY_TASK_ID]}"
+SEEDS=(0 1 2)
+CELL=$(( SLURM_ARRAY_TASK_ID % 4 ))
+SEED=${SEEDS[$(( SLURM_ARRAY_TASK_ID / 4 ))]}
+HEAD="${HEADS[$CELL]}"
+GOAL="${GOALS[$CELL]}"
 
-DATA_ROOT="/scratch/patodia.pa/av-policy-lab/features/f0_v2"
-CKPT_DIR="/scratch/patodia.pa/av-policy-lab/runs/f5_2x2"
+DATA_ROOT="/scratch/patodia.pa/av-policy-lab/features/f0_v3"
+CKPT_DIR="/scratch/patodia.pa/av-policy-lab/runs/f5_2x2_v3"
 REPO_ROOT="/home/patodia.pa/av-policy-lab"
 mkdir -p "$CKPT_DIR" /scratch/patodia.pa/av-policy-lab/logs
 
@@ -44,4 +47,4 @@ PYTHONPATH="$REPO_ROOT/nuplan" "$PYBIN" -u nuplan/training/train_policy.py \
     --head "$HEAD" --goal "$GOAL" \
     --data-root "$DATA_ROOT" \
     --ckpt-dir  "$CKPT_DIR" \
-    --epochs 150 --batch-size 64 --num-workers 2 --seed 0 --device cuda
+    --epochs 150 --batch-size 64 --num-workers 2 --seed "$SEED" --device cuda
