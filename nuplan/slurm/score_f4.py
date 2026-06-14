@@ -197,11 +197,20 @@ def pass_combine() -> None:
 
 
 def main():
+    global F0_DIR, OUT_DIR
     ap = argparse.ArgumentParser()
     ap.add_argument("--pass", dest="which", choices=("shards", "map", "combine"),
                     required=True)
+    ap.add_argument("--f0-dir", default=None,
+                    help="shard source (UNPERTURBED extractions only for F4)")
+    ap.add_argument("--out-dir", default=None,
+                    help="where shard_scores/f4_scores are written")
     ap.add_argument("--smoke", type=int, default=0)
     a = ap.parse_args()
+    if a.f0_dir:
+        F0_DIR = Path(a.f0_dir)
+    if a.out_dir:
+        OUT_DIR = Path(a.out_dir)
     if a.which == "shards":
         pass_shards()
     elif a.which == "combine":
