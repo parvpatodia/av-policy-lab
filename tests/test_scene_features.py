@@ -264,3 +264,18 @@ def test_iteration_timeout_guard_fires_and_cleans_up():
     with _timeout_guard(5):
         _ = sum(range(100))
     assert signal.alarm(0) == 0
+
+
+def test_is_complete_shard_rejects_truncated(tmp_path):
+    """Resume must regenerate truncated/0-byte shards, not skip them.
+    REF: task 14 left a 0-byte shard after the mid-write kill."""
+    import torch
+    from features.scene_features import SceneFeatureExtractor
+    good = tmp_path / "good.pt"
+    torch.save({"samples": [], "config": {}}, good)
+    empty = tmp_path / "empty.pt"; empty.touch()
+    garbage = tmp_path / "garbage.pt"; garbage.write_bytes(b"PK\x03\x04truncated")
+    assert SceneFeatureExtractor._is_complete_shard(good)
+    assert not SceneFeatureExtractor._is_complete_shard(empty)
+    assert not SceneFeatureExtractor._is_complete_shard(garbage)
+    assert not SceneFeatureExtractor._is_complete_shard(tmp_path / "missing.pt")

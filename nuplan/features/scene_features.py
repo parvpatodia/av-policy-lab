@@ -1280,6 +1280,15 @@ class SceneFeatureExtractor:
                 break
         return samples
 
+    @staticmethod
+    def _is_complete_shard(path: Path) -> bool:
+        """True if the .pt shard is a fully written torch archive (zip)."""
+        import zipfile
+        try:
+            return path.stat().st_size > 0 and zipfile.is_zipfile(path)
+        except OSError:
+            return False
+
     def save_shard(self, samples: List[Dict[str, np.ndarray]], out_path: Path) -> None:
         """Serialize a list of samples to a single .pt shard (tensors)."""
         if torch is None:  # pragma: no cover
@@ -1321,8 +1330,17 @@ class SceneFeatureExtractor:
             # Sequential worker), so shard_for_i maps to the same scenarios every run.
             shard_for_i = i // scenarios_per_shard
             shard_path = out_dir / f"scene_shard_{shard_for_i:05d}.pt"
+            # WHY validate, not just exists(): a job killed mid-write leaves a
+            # truncated/0-byte shard (observed: task 14 after the 20h hang).
+            # Existence-only resume would SKIP it and silently drop those
+            # scenarios forever. A torch save is a zip; is_zipfile() is a cheap
+            # completeness check that catches truncation. A corrupt shard is
+            # removed and regenerated.
             if shard_path.exists():
-                continue
+                if self._is_complete_shard(shard_path):
+                    continue
+                logger.warning("removing incomplete shard %s (will regenerate)", shard_path)
+                shard_path.unlink()
             buf.extend(self.extract_scenario(scn, stride=stride))
             if (i + 1) % scenarios_per_shard == 0 and buf:
                 path = out_dir / f"scene_shard_{shard_for_i:05d}.pt"
