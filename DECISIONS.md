@@ -220,3 +220,20 @@ slope-focused (the hypothesis is about how the gap scales with ambiguity), and
 a separate population-weighted mean Delta can be computed post hoc by reweighting
 bands to natural frequency if a marginal estimate is needed.
 
+## ADR-020 — SMART axis: use the Bosch nuPlan checkpoint, wait for the codebase (2026-06-13)
+Steffen Hagedorn (Bosch) shared a nuPlan-trained SMART checkpoint
+(epoch=07_1180.ckpt, 7.16M params, config embedded: nuplan, 11/80 steps, 2048
+tokens, hidden 128, original-SMART architecture). This SUPERSEDES the catk
+WOMD checkpoint for our use: no fine-tuning needed (already nuPlan-trained),
+collapsing the SMART axis from "port preprocessing + fine-tune + wrap" to just
+the observation wrapper. catk kept only as a fallback.
+Decision: do NOT reverse-engineer the SMART model/rollout/observation now.
+Bosch open-sources the full codebase (incl. their nuPlan IDM-replacement
+integration) by end of June 2026; that supplies the matching model class and
+the wrapper. Reverse-engineering would be redundant in ~2 weeks. The core 2x2
+under IDM is branch-independent and runs first; SMART slots in on release with
+the checkpoint already validated. Details: docs/frontier/SMART_INTEGRATION.md.
+Checkpoint and any derived weights are never committed to this repo (nuPlan
+non-commercial license; cite Hagedorn et al. 2025). The shgd95 collaboration
+repo is read-only to us; nothing is pushed there without Parv's review.
+
