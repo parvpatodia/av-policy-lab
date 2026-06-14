@@ -24,6 +24,7 @@ DB_DIR = "/scratch/patodia.pa/nuplan/data/cache/mini"
 SIM_OUT = Path("/scratch/patodia.pa/av-policy-lab/sim_results")
 HYDRA_BASE = str(DEVKIT / "nuplan" / "planning" / "script")
 REPO_CONFIG_DIR = str(REPO / "config")
+TUPLAN_CONFIG_DIR = "/home/patodia.pa/tuplan_garage/tuplan_garage/planning/script/config/simulation"
 
 import hydra  # noqa: E402
 from collections import namedtuple  # noqa: E402
@@ -58,7 +59,7 @@ def build_cfg(args, exp_name: str):
         # histogram PDFs and bokeh 2.4 is incompatible with this env numpy;
         # CLS numbers come from metric_file + aggregator parquets.
         "main_callback=[time_callback,metric_file_callback,metric_aggregator_callback]",
-        f"hydra.searchpath=[{paths.common_dir}, {paths.experiment_dir}, file://{REPO_CONFIG_DIR}]",
+        f"hydra.searchpath=[{paths.common_dir}, {paths.experiment_dir}, file://{REPO_CONFIG_DIR}, file://{TUPLAN_CONFIG_DIR}]",
         "output_dir=${group}/${experiment}",
         "scenario_builder=nuplan_mini",
         f"scenario_builder.db_files={DB_DIR}",
@@ -75,6 +76,8 @@ def build_cfg(args, exp_name: str):
         overrides += ["planner=idm_planner"]
     elif args.planner == "log_future":
         overrides += ["planner=log_future_planner"]
+    elif args.planner == "pdm_closed":
+        overrides += ["planner=pdm_closed_planner"]
     if args.tokens_file:
         tokens = json.loads(Path(args.tokens_file).read_text())
         toks = "[" + ",".join(tokens) + "]"
@@ -89,7 +92,7 @@ def build_cfg(args, exp_name: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--planner", choices=("policy", "idm", "log_future"), required=True)
+    ap.add_argument("--planner", choices=("policy", "idm", "log_future", "pdm_closed"), required=True)
     ap.add_argument("--head", choices=("det", "diff"), default=None)
     ap.add_argument("--goal", choices=("route", "precise"), default=None)
     ap.add_argument("--ckpt", default=None)
