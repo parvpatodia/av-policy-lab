@@ -296,3 +296,28 @@ Verification gate: analytic Gaussian MDE matches Monte-Carlo through the real
 estimator within MC error; null holds alpha. 31 analysis tests green (HPC
 nuplan env + local). Supersedes the n=1000 power line in RESEARCH_PROTOCOL.md.
 
+## ADR-024 — S_inter materially over-fires; freeze blocked pending rating (2026-06-14)
+Pre-freeze construct-validity check (docs/frontier/S_INTER_DIAGNOSTIC.md;
+tool nuplan/analysis/s_inter_diagnostic.py, reuses the production s_inter on
+250 high-F4 scenes from local f0_v2). The tool is validated: a self-test
+classifies a straight orthogonal agent as cross and a heading-rate-bent
+same-direction agent as curvature-only, and the stored agent heading agrees
+with velocity direction to median 0.1deg, so s_inter rolls along the right
+direction. Findings: only 6% of high-F4 scenes are led by genuine cross/oncoming
+conflicts; 84% are led by SAME-DIRECTION near-parallel agents (lead relative
+heading median 5deg, crossing angle median 4deg); and 58.8% of high-F4 score
+mass is a CURVATURE ARTIFACT, a crossing that vanishes when the agent is
+re-rolled straight (median hr only 1.3deg/s, but near-parallel geometry makes
+5 s CTRV-rollout intersection hypersensitive to noisy 2-point hr). PrET gap
+median 2.3 s sits at the band-pass peak, so grazes score ~1.0. The curvature
+artifact is an interpretation-free bug; the same-direction dominance is a
+moderator-scope question. DECISION: do NOT change F4 or freeze the manifest yet.
+The blind rating is the external arbiter of this exact question and its answer
+key is valid only against the current F4; this diagnostic predicts weak
+F4-human correlation in the high band. Sequence: rating first -> decide scope
+and fix (cap agent rollout horizon + hr deadband at minimum; optional
+crossing-angle gate) -> re-score v1.2 + re-run face-validity gate + regenerate
+rating sheet -> then freeze. f4_score.py untouched. This supersedes the
+"freeze N=800" timing in ADR-023: the N decision stands, but the freeze waits
+on F4 v1.2.
+
