@@ -100,6 +100,7 @@ def run(args) -> dict:
 
     # moderation per condition, using the seed-averaged cells
     out = {"cells": {k: summarize(v) for k, v in cells.items()}}
+    deltas = {}
     for cond, det_key, diff_key in (("route", "det_route", "diff_route"),
                                      ("precise", "det_precise", "diff_precise")):
         det, diff = cells[det_key], cells[diff_key]
@@ -107,15 +108,19 @@ def run(args) -> dict:
         if not toks:
             continue
         delta = {t: diff[t] - det[t] for t in toks}
+        deltas[cond] = delta
         res = M.moderation(delta, f4, cond)
         out[cond] = M.asdict(res)
         print(f"\n== {cond}: mean Delta {res.mean_delta:+.4f} "
               f"CI{res.mean_delta_ci95}  beta1 {res.beta1:+.4f} "
               f"p(1-sided) {res.beta1_p_onesided:.4f}  rho {res.spearman_rho:+.3f}")
-    if "route" in out and "precise" in out:
-        d = out["route"]["beta1"] - out["precise"]["beta1"]
-        out["route_minus_precise_beta1"] = d
-        print(f"\n== beta1(route) - beta1(precise) = {d:+.4f}  (hypothesis: > 0)")
+    if "route" in deltas and "precise" in deltas:
+        cres = M.moderation_contrast(deltas["route"], deltas["precise"], f4)
+        out["contrast"] = M.asdict(cres)
+        out["route_minus_precise_beta1"] = cres.beta1   # back-compat
+        print(f"\n== contrast beta1(route)-beta1(precise) = {cres.beta1:+.4f}  "
+              f"HC3 SE {cres.beta1_se_hc3:.4f}  p(1-sided) {cres.beta1_p_onesided:.4f}"
+              f"  (hypothesis: > 0)")
     if args.out:
         Path(args.out).write_text(json.dumps(out, indent=2))
         print(f"\nwrote {args.out}")

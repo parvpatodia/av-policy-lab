@@ -180,6 +180,25 @@ def moderation(delta: Dict[str, float], f4: Dict[str, float],
     )
 
 
+def moderation_contrast(delta_route: Dict[str, float],
+                        delta_precise: Dict[str, float],
+                        f4: Dict[str, float]) -> ModerationResult:
+    """Inference on the HEADLINE: beta1(route) - beta1(precise).
+
+    Both conditions are evaluated on the same tokens, so the contrast slope is
+    exactly the slope of the per-token difference C_i = Delta_route_i -
+    Delta_precise_i regressed on F4 (OLS slope is linear in y with shared X:
+    slope(a-b) = slope(a) - slope(b)). Regressing the difference, rather than
+    subtracting two separately-fit slopes, yields a single HC3 SE that already
+    absorbs the within-token correlation between the conditions, which is what
+    a valid significance test for the contrast requires. The bare difference
+    reported elsewhere has no SE and must not be tested on its own.
+    """
+    toks = sorted(set(delta_route) & set(delta_precise))
+    contrast = {t: delta_route[t] - delta_precise[t] for t in toks}
+    return moderation(contrast, f4, "route_minus_precise")
+
+
 def paired_delta(det_dir: str, diff_dir: str) -> Dict[str, float]:
     det = read_cell_scores(latest_aggregator(det_dir))
     diff = read_cell_scores(latest_aggregator(diff_dir))
@@ -191,6 +210,7 @@ def run(args) -> dict:
     f4_all = json.load(open(args.f4_scores))
     f4 = {t: r["f4"] for t, r in f4_all.items() if r.get("f4") is not None}
     out = {}
+    deltas = {}
     for cond, det_dir, diff_dir in (
         ("route", args.det_route, args.diff_route),
         ("precise", args.det_precise, args.diff_precise),
@@ -198,6 +218,7 @@ def run(args) -> dict:
         if not (det_dir and diff_dir):
             continue
         delta = paired_delta(det_dir, diff_dir)
+        deltas[cond] = delta
         res = moderation(delta, f4, cond)
         out[cond] = asdict(res)
         print(f"\n== {cond} (n={res.n})")
@@ -206,10 +227,14 @@ def run(args) -> dict:
               f"t={res.beta1_t:.2f}  p(1-sided)={res.beta1_p_onesided:.4f}")
         print(f"   Spearman rho = {res.spearman_rho:+.3f}  "
               f"Theil-Sen = {res.theilsen_slope:+.4f}")
-    if "route" in out and "precise" in out:
-        diff_slope = out["route"]["beta1"] - out["precise"]["beta1"]
-        out["route_minus_precise_beta1"] = diff_slope
-        print(f"\n== hypothesis: beta1(route) - beta1(precise) = {diff_slope:+.4f}")
+    if "route" in deltas and "precise" in deltas:
+        cres = moderation_contrast(deltas["route"], deltas["precise"], f4)
+        out["contrast"] = asdict(cres)
+        out["route_minus_precise_beta1"] = cres.beta1   # kept for back-compat
+        print(f"\n== HYPOTHESIS  beta1(route) - beta1(precise) "
+              f"(n={cres.n})")
+        print(f"   contrast beta1 = {cres.beta1:+.4f}  HC3 SE {cres.beta1_se_hc3:.4f}"
+              f"  t={cres.beta1_t:.2f}  p(1-sided)={cres.beta1_p_onesided:.4f}")
         print("   (predicted > 0: diffusion helps under ambiguity only when "
               "the goal does not already resolve it)")
     if args.out:

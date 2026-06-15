@@ -50,10 +50,27 @@ and collapse under precise; manipulation check only, never a moderator.
 ## 4. Evaluation (frozen)
 
 - Set: manifest frozen by freeze_manifest.py (SHA256 + git commit recorded),
-  4-band F4-stratified (zero/low/med/high, equal allocation; balanced-X for
-  slope precision, ADR-019). Target n decided by a ~100-scenario pilot that
-  measures sigma(Delta); n in {500, 1000} per the power table (n=1000 gives
-  >=0.83 power for beta1>=0.05 at sigma<=0.20).
+  4-band F4-stratified (zero/low/med/high, equal allocation). Balanced-X is
+  retained for BAND COVERAGE, not slope precision: on the real F4 distribution
+  the design-effect over random sampling is only 1.10x (~4%, the natural
+  distribution is already high-variance bimodal), but balancing guarantees
+  >=125 high- and med-band scenarios that random N=500 would undersample
+  (~76 high, ~36 med), stabilizing the per-band CIs and the robustness checks
+  (ADR-019 restated by ADR-023; full analysis in POWER_ANALYSIS.md).
+- Power and N (ADR-023, supersedes the n=1000 line below). The HEADLINE is the
+  cross-condition contrast beta1(route)-beta1(precise), not a single slope. The
+  earlier claim "n=1000 gives >=0.83 power for beta1>=0.05 at sigma<=0.20" is
+  correct for a single condition's slope (verified: 0.877) but gives only 0.63
+  power for the contrast at worst-case residual correlation rho_cond=0. Because
+  the heads share everything but the output head, sigma_Delta is plausibly
+  <=0.10, where even N=500 powers the contrast at 0.88; the binding unknown is
+  sigma_Delta. DECISION: freeze the manifest at N=800 (the safe superset, never
+  re-freeze), then run a pre-registered internal-pilot variance re-estimation
+  (Wittes-Brittain): evaluate a stratified 200-token pilot across all 4 cells,
+  measure realized sigma_Delta and rho_cond with power_analysis.reestimate_from_pilot,
+  and complete tokens up to the re-estimated N (capped at 800), stopping early
+  if the 0.035-contrast is already powered. The decision uses only the nuisance
+  variance, never the effect estimate, so alpha is preserved.
 - Simulator: nuPlan two_stage_controller (LQR + kinematic bicycle), the
   official CLS setup. CLS-NR (box replay) AND CLS-R (IDM) both run; SMART
   added later. Same manifest across all cells and agent modes (paired).

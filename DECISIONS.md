@@ -265,3 +265,34 @@ GPU QOS caps 8 submitted / 4 running, so the 12 cells (4 x 3 seeds) run in
 free. Data freeze makes wave staggering fairness-safe. All HPC compute (train
 7715872, f4enrich2 7712443) is queued for after maintenance ends 2026-06-19.
 
+## ADR-023 — Power analysis: contrast is the estimand; N=800 + internal pilot (2026-06-14)
+Re-derived the eval sizing properly before the manifest freeze (full writeup in
+docs/frontier/POWER_ANALYSIS.md; machinery in nuplan/analysis/power_analysis.py
+with 11 tests). Three findings, all corrections to the prior plan.
+(1) The HEADLINE is the cross-condition contrast beta1(route)-beta1(precise),
+not a single slope. The prior power_analysis.py (2026-06-12) only simulated a
+single condition's slope, so the pre-registered claim "n=1000 -> 0.83 power for
+beta1>=0.05 at sigma<=0.20" is for the WRONG estimand: verified correct for one
+slope (0.877) but only 0.63 power for the contrast at worst-case residual
+correlation rho_cond=0. Fix: moderation_contrast() regresses the per-token
+difference C_i = Delta_route_i - Delta_precise_i on F4, giving one HC3 SE that
+absorbs the within-token correlation (slope(a-b)=slope(a)-slope(b) with shared
+X). The contrast had NO SE/p in analyze_moderation.run or results_table.run
+before this; the experiment's main hypothesis was untestable. Both now emit it.
+(2) Balanced-X design-effect on the real F4 distribution is only 1.10x (~4%),
+not a meaningful precision gain (natural F4 is already high-variance bimodal:
+60% zeros + 15% high). ADR-019's "slope precision" justification is restated:
+balanced-X earns its place by guaranteeing >=125 high/med-band scenarios that
+random N=500 undersamples (~76 high, ~36 med), not by shrinking the slope SE.
+(3) sigma_Delta is unknown pre-eval and dominates the answer; the Gaussian MDE
+is also 4-7% optimistic under bounded CLS (clipping at 1). DECISION: freeze the
+manifest at N=800 (safe superset, never re-freeze), then run a pre-registered
+internal-pilot variance re-estimation (Wittes-Brittain 1990): a stratified
+200-token pilot across all 4 cells measures realized sigma_Delta and rho_cond
+via reestimate_from_pilot(), then complete tokens up to the re-estimated N
+(cap 800), stopping early if the 0.035-contrast is already powered. Decision
+uses only the nuisance variance, never the effect, so alpha is preserved.
+Verification gate: analytic Gaussian MDE matches Monte-Carlo through the real
+estimator within MC error; null holds alpha. 31 analysis tests green (HPC
+nuplan env + local). Supersedes the n=1000 power line in RESEARCH_PROTOCOL.md.
+
