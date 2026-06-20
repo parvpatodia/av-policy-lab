@@ -236,9 +236,12 @@ def train(args) -> dict:
             print("[resume] pre-EMA checkpoint: shadow re-seeded from live weights")
         start_epoch, global_step = ck["epoch"] + 1, ck["global_step"]
         best = ck["best_minADE"]
-        torch.set_rng_state(ck["rng"]["torch"])
+        # WHY .cpu(): latest.pt loads with map_location=device (cuda) so opt/model
+        # state lands on GPU, but that also moves the CPU RNG ByteTensors to CUDA;
+        # set_rng_state{,_all} require CPU ByteTensors, so move just these back.
+        torch.set_rng_state(ck["rng"]["torch"].cpu())
         if ck["rng"]["cuda"] is not None and torch.cuda.is_available():
-            torch.cuda.set_rng_state_all(ck["rng"]["cuda"])
+            torch.cuda.set_rng_state_all([s.cpu() for s in ck["rng"]["cuda"]])
         random.setstate(ck["rng"]["python"])
         print(f"[resume] {latest} -> epoch {start_epoch}, best minADE {best:.3f}")
 
