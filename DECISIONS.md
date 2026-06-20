@@ -251,3 +251,73 @@ Tested: guard fires in 1.0s on a 10s hang, no lingering alarm, 173 tests green.
 This is the standard production pattern (no single pathological input may stall
 a batch job); it should have been in v1.
 
+## ADR-022 — v3 training data frozen at 722 shards; 12 cells in 2 waves (2026-06-14)
+Task 14's last shard (1 of ~16/task) never regenerated cleanly before a 4-day
+cluster maintenance window (mapo-2026, 2026-06-15..19, 765 nodes). Rather than
+block 12-cell GPU training on 0.14% of data (~600/440k samples) AND risk a
+fairness violation (if the shard landed mid-training, staggered array cells
+would glob different shard sets and different train/val splits), the dataset is
+FROZEN at the verified 722 shards. task14 resubmit cancelled; its 14 valid
+shards are kept. Fairness (identical data across all cells) over completeness.
+The frozen set includes task_0016 (perturbed junction enrichment, 59 shards).
+GPU QOS caps 8 submitted / 4 running, so the 12 cells (4 x 3 seeds) run in
+2 waves: wave 1 = array 0-7 (seeds 0,1), wave 2 = 8-11 (seed 2) when slots
+free. Data freeze makes wave staggering fairness-safe. All HPC compute (train
+7715872, f4enrich2 7712443) is queued for after maintenance ends 2026-06-19.
+
+## ADR-023 — Power analysis: contrast is the estimand; N=800 + internal pilot (2026-06-14)
+Re-derived the eval sizing properly before the manifest freeze (full writeup in
+docs/frontier/POWER_ANALYSIS.md; machinery in nuplan/analysis/power_analysis.py
+with 11 tests). Three findings, all corrections to the prior plan.
+(1) The HEADLINE is the cross-condition contrast beta1(route)-beta1(precise),
+not a single slope. The prior power_analysis.py (2026-06-12) only simulated a
+single condition's slope, so the pre-registered claim "n=1000 -> 0.83 power for
+beta1>=0.05 at sigma<=0.20" is for the WRONG estimand: verified correct for one
+slope (0.877) but only 0.63 power for the contrast at worst-case residual
+correlation rho_cond=0. Fix: moderation_contrast() regresses the per-token
+difference C_i = Delta_route_i - Delta_precise_i on F4, giving one HC3 SE that
+absorbs the within-token correlation (slope(a-b)=slope(a)-slope(b) with shared
+X). The contrast had NO SE/p in analyze_moderation.run or results_table.run
+before this; the experiment's main hypothesis was untestable. Both now emit it.
+(2) Balanced-X design-effect on the real F4 distribution is only 1.10x (~4%),
+not a meaningful precision gain (natural F4 is already high-variance bimodal:
+60% zeros + 15% high). ADR-019's "slope precision" justification is restated:
+balanced-X earns its place by guaranteeing >=125 high/med-band scenarios that
+random N=500 undersamples (~76 high, ~36 med), not by shrinking the slope SE.
+(3) sigma_Delta is unknown pre-eval and dominates the answer; the Gaussian MDE
+is also 4-7% optimistic under bounded CLS (clipping at 1). DECISION: freeze the
+manifest at N=800 (safe superset, never re-freeze), then run a pre-registered
+internal-pilot variance re-estimation (Wittes-Brittain 1990): a stratified
+200-token pilot across all 4 cells measures realized sigma_Delta and rho_cond
+via reestimate_from_pilot(), then complete tokens up to the re-estimated N
+(cap 800), stopping early if the 0.035-contrast is already powered. Decision
+uses only the nuisance variance, never the effect, so alpha is preserved.
+Verification gate: analytic Gaussian MDE matches Monte-Carlo through the real
+estimator within MC error; null holds alpha. 31 analysis tests green (HPC
+nuplan env + local). Supersedes the n=1000 power line in RESEARCH_PROTOCOL.md.
+
+## ADR-024 — S_inter materially over-fires; freeze blocked pending rating (2026-06-14)
+Pre-freeze construct-validity check (docs/frontier/S_INTER_DIAGNOSTIC.md;
+tool nuplan/analysis/s_inter_diagnostic.py, reuses the production s_inter on
+250 high-F4 scenes from local f0_v2). The tool is validated: a self-test
+classifies a straight orthogonal agent as cross and a heading-rate-bent
+same-direction agent as curvature-only, and the stored agent heading agrees
+with velocity direction to median 0.1deg, so s_inter rolls along the right
+direction. Findings: only 6% of high-F4 scenes are led by genuine cross/oncoming
+conflicts; 84% are led by SAME-DIRECTION near-parallel agents (lead relative
+heading median 5deg, crossing angle median 4deg); and 58.8% of high-F4 score
+mass is a CURVATURE ARTIFACT, a crossing that vanishes when the agent is
+re-rolled straight (median hr only 1.3deg/s, but near-parallel geometry makes
+5 s CTRV-rollout intersection hypersensitive to noisy 2-point hr). PrET gap
+median 2.3 s sits at the band-pass peak, so grazes score ~1.0. The curvature
+artifact is an interpretation-free bug; the same-direction dominance is a
+moderator-scope question. DECISION: do NOT change F4 or freeze the manifest yet.
+The blind rating is the external arbiter of this exact question and its answer
+key is valid only against the current F4; this diagnostic predicts weak
+F4-human correlation in the high band. Sequence: rating first -> decide scope
+and fix (cap agent rollout horizon + hr deadband at minimum; optional
+crossing-angle gate) -> re-score v1.2 + re-run face-validity gate + regenerate
+rating sheet -> then freeze. f4_score.py untouched. This supersedes the
+"freeze N=800" timing in ADR-023: the N decision stands, but the freeze waits
+on F4 v1.2.
+

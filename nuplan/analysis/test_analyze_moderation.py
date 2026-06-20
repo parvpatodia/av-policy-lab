@@ -74,6 +74,43 @@ def test_moderation_null_not_significant():
     assert res.beta1_p_onesided > 0.05
 
 
+def test_contrast_equals_difference_of_slopes():
+    """The contrast estimator must exactly equal beta1(route)-beta1(precise),
+    because OLS slope is linear in y with shared X."""
+    rng = np.random.default_rng(0)
+    toks = [f"t{i}" for i in range(300)]
+    f4 = {t: rng.uniform(0, 1) for t in toks}
+    dr = {t: 0.06 * f4[t] + rng.normal(0, 0.05) for t in toks}
+    dp = {t: 0.01 * f4[t] + rng.normal(0, 0.05) for t in toks}
+    br = A.moderation(dr, f4, "route").beta1
+    bp = A.moderation(dp, f4, "precise").beta1
+    c = A.moderation_contrast(dr, dp, f4)
+    assert c.beta1 == pytest.approx(br - bp, abs=1e-9)
+    assert c.condition == "route_minus_precise"
+
+
+def test_contrast_significant_when_route_steeper():
+    rng = np.random.default_rng(1)
+    toks = [f"t{i}" for i in range(800)]
+    f4 = {t: rng.uniform(0, 1) for t in toks}
+    # shared scenario difficulty -> positively correlated residuals (realistic)
+    shared = {t: rng.normal(0, 0.04) for t in toks}
+    dr = {t: 0.07 * f4[t] + shared[t] + rng.normal(0, 0.03) for t in toks}
+    dp = {t: 0.00 * f4[t] + shared[t] + rng.normal(0, 0.03) for t in toks}
+    c = A.moderation_contrast(dr, dp, f4)
+    assert c.beta1 > 0.04 and c.beta1_p_onesided < 0.01
+
+
+def test_contrast_not_significant_when_slopes_equal():
+    rng = np.random.default_rng(2)
+    toks = [f"t{i}" for i in range(800)]
+    f4 = {t: rng.uniform(0, 1) for t in toks}
+    dr = {t: 0.04 * f4[t] + rng.normal(0, 0.05) for t in toks}
+    dp = {t: 0.04 * f4[t] + rng.normal(0, 0.05) for t in toks}
+    c = A.moderation_contrast(dr, dp, f4)
+    assert c.beta1_p_onesided > 0.05
+
+
 def test_read_cell_scores_filters_aggregate_rows(tmp_path):
     import pandas as pd
     rows = [
