@@ -79,8 +79,12 @@ def build_cfg(args, exp_name: str):
     elif args.planner == "pdm_closed":
         overrides += ["planner=pdm_closed_planner"]
     if args.tokens_file:
-        tokens = json.loads(Path(args.tokens_file).read_text())
-        toks = "[" + ",".join(tokens) + "]"
+        data = json.loads(Path(args.tokens_file).read_text())
+        # accept either a bare token list or a freeze payload {"tokens": [...]}
+        tokens = data["tokens"] if isinstance(data, dict) else data
+        # WHY quote each token: some tokens (e.g. 595322e649225137) look like
+        # scientific-notation floats; unquoted, hydra parses them as numbers and rejects them.
+        toks = "[" + ",".join(f'"{t}"' for t in tokens) + "]"
         overrides += [f"scenario_filter.scenario_tokens={toks}"]
     else:
         overrides += [

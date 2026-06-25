@@ -29,7 +29,8 @@ from pathlib import Path
 import numpy as np
 
 
-def freeze(f4_path: str, n: int, seed: int, out_path: str) -> dict:
+def freeze(f4_path: str, n: int, seed: int, out_path: str, exclude=None) -> dict:
+    exclude = set(exclude or [])  # keep out (e.g. eval manifest) so a probe is disjoint
     f4_all = json.load(open(f4_path))
     scored = {t: r for t, r in f4_all.items()
               if r.get("f4") is not None and not r.get("excluded")}
@@ -48,7 +49,7 @@ def freeze(f4_path: str, n: int, seed: int, out_path: str) -> dict:
     chosen: list[str] = []
     strata = {}
     for name, pred in bands:
-        in_bin = [t for t, v in zip(toks, f4) if pred(v)]
+        in_bin = [t for t, v in zip(toks, f4) if pred(v) and t not in exclude]
         k = min(per, len(in_bin))
         pick = sorted(rng.choice(in_bin, k, replace=False).tolist()) if in_bin else []
         chosen.extend(pick)
@@ -85,5 +86,7 @@ if __name__ == "__main__":
     ap.add_argument("--n", type=int, default=500)
     ap.add_argument("--seed", type=int, default=20260612)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--exclude", default=None, help="manifest.json whose tokens to exclude (disjoint probe)")
     a = ap.parse_args()
-    freeze(a.f4_scores, a.n, a.seed, a.out)
+    excl = set(json.load(open(a.exclude))["tokens"]) if a.exclude else None
+    freeze(a.f4_scores, a.n, a.seed, a.out, exclude=excl)
