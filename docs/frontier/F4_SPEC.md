@@ -5,6 +5,8 @@ Role in the study: pre-treatment MODERATOR of the head effect. Claim under test:
 the diffusion-vs-deterministic gap (route-region condition) grows with F4.
 This is moderation (effect modification), not mediation.
 
+> AMENDMENT 2026-06-21 (ADR-027): F4 is reframed as an INTERACTION-CRITICALITY moderator, not "ambiguity" - human external validation failed twice; geometric validity (Signal A) holds. Formula unchanged. See F4_VALIDATION_RESULTS.md (Mac repo).
+
 ## 1. Definition
 
 F4 in [0,1], model-free, frozen before any closed-loop comparison, identical

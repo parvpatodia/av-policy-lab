@@ -321,3 +321,34 @@ rating sheet -> then freeze. f4_score.py untouched. This supersedes the
 "freeze N=800" timing in ADR-023: the N decision stands, but the freeze waits
 on F4 v1.2.
 
+
+
+## ADR-027 - F4 reframed: "ambiguity" -> "interaction-criticality" moderator (2026-06-21)
+Decision (Parv): relabel F4 from a "scene ambiguity" moderator to an INTERACTION-CRITICALITY
+(interaction-conflict + route-branch presence) moderator. The score formula
+G_stop*(1-(1-S_branch)*(1-S_inter)) and the pre-registered moderation analysis (Delta ~ 1 + F4,
+cross-condition contrast) are UNCHANGED; only the construct LABEL is corrected to what validation
+supports.
+Why: F4 failed human external convergent validity TWICE - v1.1 ~0.15 vs 52 ratings (see ADR-024
+over-fire), and a fresh blind protocol gave Spearman 0.020 (p=0.90), ROBUST to a temporal render
+that drew the real agent futures (so not a render artifact). A 4-persona AI panel reached only 0.31
+and dropped on high-s_inter scenes once futures were shown. F4's GEOMETRIC validity DOES hold:
+s_inter detects real space-time crossings (Signal A logged-future replication, Cliff delta 0.345,
+p<1e-4, survives partialling out agent-count + ego-speed); s_branch weakly tracks real agent
+route-divergence (Signal D, rank-biserial 0.16). Reading: a path-crossing is real but usually a
+clear yield/go, not a decision; F4 measures interaction-conflict + branching - which is what we now
+call it. H1 now reads "the route-vs-precise CLS gap grows with interaction-criticality F4."
+Validation (pre-registered before results): Mac repo docs/frontier/F4_VALIDATION_PROTOCOL.md +
+F4_VALIDATION_RESULTS.md. Supersedes the "ambiguity" label in RESEARCH_PROTOCOL.md H1 and F4_SPEC.md.
+
+## ADR-028 — Eval manifest + CLS-selection probe FROZEN (pre-registration) (2026-06-23)
+Froze BOTH closed-loop scenario sets BEFORE any CLS is computed (no unblinding, no
+cherry-picking). Files in /scratch/.../av-policy-lab/eval_tokens/:
+- eval manifest: manifest.json, N=800, seed 0, 4 F4 bands x 200 (available zero/low/med/high
+  = 3352/997/402/853, all >= 200), sha256 f3b3b234..., source f4_scores_v11.json.
+- CLS-selection probe (ADR-018): cls_probe50.json, N=48 (12/band), seed 1, sha256 f859eba2...,
+  VERIFIED DISJOINT from the manifest (overlap 0) so checkpoint selection never sees the test set.
+freeze_manifest.py extended with a backward-compatible --exclude option to draw the disjoint
+probe. Both carry sha256 + git commit for audit. Re-freezable before the eval runs if N changes;
+immutable once the eval starts. NOTE moderator label is interaction-criticality (ADR-027), not
+"ambiguity"; the stratification F4 = g_stop*(1-(1-s_branch)(1-s_inter)) is unchanged.

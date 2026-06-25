@@ -11,6 +11,8 @@ capacity-matched deterministic one on nuPlan closed-loop depend on (a) how
 much the goal conditioning already resolves the scene, and (b) the realism of
 the background agents?
 
+> AMENDMENT 2026-06-21 (ADR-027): "ambiguity F4" below is RELABELED to "interaction-criticality F4". F4 failed human convergent validity twice (0.15, then 0.02 robust to a temporal render) but its geometric validity holds (Signal A Cliff delta=0.345). Formula + analysis UNCHANGED; construct label only. See Mac docs/frontier/F4_VALIDATION_RESULTS.md.
+
 - H1 (goal x head): under route-region conditioning, the diffusion-minus-
   deterministic CLS gap increases with per-scenario ambiguity F4 (slope
   beta1_route > 0). Under precise-point conditioning the slope is ~0
