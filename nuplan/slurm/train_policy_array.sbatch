@@ -1,7 +1,9 @@
 #!/bin/bash
 # F5: train the 2x2 — array task i selects (head, goal) cell i.
-# Resume: each cell picks up its latest.pt. Self-requeues near the wall clock
-# (USR1 trap below) so 150 epochs spans windows without a manual resubmit.
+# Matched re-run (v4): early-stop DISABLED (--patience 9999) so every cell trains the
+# full fixed budget, + periodic checkpoints (--ckpt-every) for closed-loop CLS selection.
+# Resume: each cell picks up its latest.pt. The 8h wall is spanned by an external cron
+# resubmitter (this cluster has JobRequeue=0, so in-job self-requeue is unavailable).
 #SBATCH --job-name=f5-2x2
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
@@ -11,13 +13,6 @@
 #SBATCH --time=07:55:00
 #SBATCH --output=/scratch/%u/av-policy-lab/logs/f5-%A_%a.out
 #SBATCH --error=/scratch/%u/av-policy-lab/logs/f5-%A_%a.err
-# WHY --requeue + --signal: gpu QOS caps the user at 8 submitted / 4 running
-# jobs and 7h55m wall time, but 150 epochs needs ~4 windows. A dependency chain
-# would blow the 8-submit cap; scontrol requeue keeps the SAME job id (no extra
-# submit slot) and resumes from latest.pt. USR1 is delivered to the batch shell
-# (B:) 300s before the wall so the trap can requeue cleanly.
-#SBATCH --requeue
-#SBATCH --signal=B:USR1@300
 
 set -euo pipefail
 
@@ -30,7 +25,7 @@ HEAD="${HEADS[$CELL]}"
 GOAL="${GOALS[$CELL]}"
 
 DATA_ROOT="/scratch/patodia.pa/av-policy-lab/features/f0_v3"
-CKPT_DIR="/scratch/patodia.pa/av-policy-lab/runs/f5_2x2_v3"
+CKPT_DIR="/scratch/patodia.pa/av-policy-lab/runs/f5_2x2_v4"
 REPO_ROOT="/home/patodia.pa/av-policy-lab"
 mkdir -p "$CKPT_DIR" /scratch/patodia.pa/av-policy-lab/logs
 
@@ -51,18 +46,14 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 echo "cell: head=$HEAD goal=$GOAL  job=${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}  node=$(hostname)"
 
 cd "$REPO_ROOT"
-# WHY background + wait + trap: under set -e a foreground python blocks the shell
-# from handling USR1 until it returns, so the wall-clock warning would be missed.
-# Backgrounded + wait lets the trap fire. On USR1: latest.pt is already on disk
-# (saved every epoch), so requeue this same job id, stop the run, exit clean.
-# A cell already at --epochs exits in seconds (empty loop) BEFORE USR1 fires, so
-# finished cells never requeue. A real crash exits non-zero before USR1 too, so it
-# FAILS under set -e instead of requeue-looping. Net: self-terminating, cap-safe.
+# Foreground call. The job runs until it finishes 150 epochs or is killed at the 8h wall
+# (latest.pt is on disk from the per-epoch save). The cron resubmitter restarts any
+# incomplete cell, which resumes from latest.pt. --patience 9999 disables early-stop so
+# every cell trains the full matched budget; --ckpt-every 10 keeps trajectory checkpoints
+# for closed-loop CLS selection (ADR-018).
 PYTHONPATH="$REPO_ROOT/nuplan" "$PYBIN" -u nuplan/training/train_policy.py \
     --head "$HEAD" --goal "$GOAL" \
     --data-root "$DATA_ROOT" \
     --ckpt-dir  "$CKPT_DIR" \
-    --epochs 150 --batch-size 64 --num-workers 2 --seed "$SEED" --device cuda &
-TRAIN_PID=$!
-trap 'echo "[requeue] USR1 at $(date -Is), resubmitting ${SLURM_JOB_ID}"; scontrol requeue "${SLURM_JOB_ID}"; kill -TERM "${TRAIN_PID}" 2>/dev/null || true; exit 0' USR1
-wait "${TRAIN_PID}"
+    --epochs 150 --patience 9999 --ckpt-every 10 \
+    --batch-size 64 --num-workers 2 --seed "$SEED" --device cuda

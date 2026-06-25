@@ -105,6 +105,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--val-stride", type=int, default=10)
     p.add_argument("--patience", type=int, default=15,
                    help="early stop after this many epochs without val minADE improvement")
+    p.add_argument("--ckpt-every", type=int, default=0,
+                   help="also KEEP a checkpoint every N epochs (0=off). WHY: closed-loop CLS "
+                        "selection (ADR-018) needs candidates across the trajectory, not just "
+                        "best.pt(open-loop val)+latest.pt; early-stop on open-loop val is "
+                        "misaligned with closed-loop selection, so for the matched re-run we "
+                        "disable early-stop (--patience>=epochs) and keep periodic checkpoints.")
     p.add_argument("--val-k", type=int, default=8,
                    help="diffusion: candidates per scene for minADE")
     p.add_argument("--ddim-steps", type=int, default=20)
@@ -294,6 +300,9 @@ def train(args) -> dict:
         else:
             bad_epochs += 1
         save_ckpt(latest, encoder, head, opt, ema, epoch, global_step, best, args)
+        if args.ckpt_every and (epoch + 1) % args.ckpt_every == 0:
+            save_ckpt(out / f"epoch_{epoch + 1:03d}.pt", encoder, head, opt, ema,
+                      epoch, global_step, best, args)
         if bad_epochs >= args.patience:
             print(f"[early-stop] no val improvement for {args.patience} epochs")
             break
