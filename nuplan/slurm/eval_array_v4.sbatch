@@ -13,7 +13,9 @@
 #SBATCH --partition=short
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
-#SBATCH --time=11:55:00
+#SBATCH --time=2-00:00:00   # WHY: per-scenario sim time varies ~10x; a shard drawing
+# several slow/high-density scenarios (esp. reactive IDM) can exceed 11h for 50 scen and
+# time out with no parquet. short partition allows 2 days.
 #SBATCH --output=/scratch/%u/av-policy-lab/logs/evalv4-%A_%a.out
 #SBATCH --error=/scratch/%u/av-policy-lab/logs/evalv4-%A_%a.err
 set -euo pipefail
