@@ -67,6 +67,23 @@ Consistent with the F4 validation result: F4 captures real geometric interaction
 not track human-perceived decision ambiguity (failed human validation twice; ADR-027), and it also
 does not moderate the policy gap.
 
+## Power: the null is informative, not underpowered
+
+Realized from the actual contrast HC3 SEs (r0 0.00624, r1 0.00683) against the pre-registered
+effect benchmarks (POWER_ANALYSIS.md: subtle ~0.02, target = slope at F4=1 ~0.035, strong ~0.05):
+
+| mode | contrast beta1 | 95% CI | realized MDE (80%) | power @0.02 | @0.035 | @0.05 |
+|---|---|---|---|---|---|---|
+| r0 (non-reactive) | -0.0064 | [-0.0186, +0.0059] | 0.0155 | 0.94 | ~1.00 | ~1.00 |
+| r1 (reactive)     | -0.0013 | [-0.0147, +0.0120] | 0.0170 | 0.90 | ~1.00 | ~1.00 |
+
+Both modes are well-powered: the realized MDE (~0.016 to 0.017) is below even the "subtle" 0.02
+benchmark, with >99.9% power for the pre-registered target (0.035) and strong (0.05) effects, and
+0.90 to 0.94 power even for a subtle 0.02 effect. The 95% CI upper bound on the contrast excludes
+the entire range of hypothesized positive effects (0.02, 0.035, 0.05) in both modes. So the data
+RULE OUT the hypothesized interaction-criticality moderation; they do not merely fail to detect it.
+This is an informative null. (Realized via statistics.NormalDist on the committed result JSONs.)
+
 ## Secondary observations (not the pre-registered hypothesis)
 
 - Diffusion shows a small but significant mean CLS edge in reactive-precise: +0.0037,
