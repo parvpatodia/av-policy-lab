@@ -466,3 +466,34 @@ shards carry ego_future + scenario_token + scenario_type, so it is feasible CPU-
 collapsed checkpoints remain not worth compute. The Tier-3 retrain (multi-day) decision is deferred
 to Parv pending Experiment 1 evidence on whether there is multimodal supervision to capture.
 Artifact: synth_bimodal_test.py; result /scratch/.../av-policy-lab/synth_bimodal_result.json.
+
+## ADR-031 — The data contains multimodal supervision the policy discards, concentrated at decision points (Exp 1) (2026-06-27)
+Finding: the real training data (f0_v3) contains substantial multimodal future supervision that the
+collapsed policy (ADR-029) discards, and it concentrates at semantically decision-heavy scenes. This
+makes a multimodality-capturing retrain viable and explains the #18 null as treatment-absent at the
+DATA level, not just the policy level.
+Method (nuplan/analysis/available_multimodality.py, CPU, N=4000, k=16): context embedding = a
+RANDOMLY-INITIALIZED (untrained) SceneEncoder, mean-pooled (input geometry only, NO future leakage --
+a trained encoder would make neighbors share futures tautologically). Per scene: k=16 cosine nearest
+neighbors; dispersion + mode-count (union-find eps=3.5m) of the neighbors' logged-future endpoints =
+"available" conditional spread. s_inter joined by scenario_token (f4_scores_v11.json).
+Results:
+- captured (policy per-scene sample dispersion, ADR-029) 0.131m  <<  available (kNN) median 3.14m /
+  mean 5.29m  <<  marginal (random-pair) 37.4m. The kNN is VALID: neighbor futures are ~12x tighter
+  than random pairs (finds genuinely similar contexts), yet ~24x MORE dispersed than the policy
+  emits. 46.3% of scenes have >=2 future modes at lane width.
+- Interaction-criticality: high s_inter (>=0.5, n=1228) available 3.55m / frac>=2 0.532 / 2.07 modes
+  vs low (n=2772) 2.94m / 0.433 / 1.88. Available multimodality RISES with interaction-criticality
+  (data-level support for the original H1 premise).
+- Scenario type (most multimodal): stationary_at_traffic_light_without_lead 10.0m / frac>=2 1.00 /
+  4.38 modes; traversing_traffic_light_intersection 8.85m / 0.94 / 3.92; near_construction_zone_sign
+  6.48m / 0.84; near_long_vehicle 5.28m / 0.94. Least: low_magnitude_speed 3.29m / 0.45. The
+  multimodality concentrates exactly at decision points (go/stop at lights, intersections, construction).
+Honesty caveats: kNN-neighbor dispersion is an UPPER bound on the true conditional spread (residual
+context differences inflate it); random-encoder similarity is a proxy. Strong suggestive evidence,
+not a point estimate of conditional entropy. Refinements: k-sensitivity, within-scenario_type matching.
+Consequence: there IS multimodality to capture -> Tier 3 (WTA/multi-hypothesis retrain + mode-
+committing selector + re-run moderation with the validated Signal A moderator and a lowered CLS
+ceiling) is viable. Decision deferred to Parv (multi-day compute, LEARN-mode "decide later" item);
+staged de-risk plan: train ONE WTA route cell + probe before committing the full retrain.
+Artifact: available_multimodality.py; result /scratch/.../av-policy-lab/avail_mm_result.json.
