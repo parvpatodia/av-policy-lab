@@ -28,6 +28,10 @@ therefore, on standard nuPlan closed-loop, both **unrealized** and **untestable 
 a measurement/method result in the lineage of Dauner et al., *Parting with Misconceptions* (CoRL
 2023); the collapse leg is independently confirmed by DIVER (arXiv:2507.04049, 2025).
 
+![Diagnostic chain](figures/diagnostic_figure.png)
+
+*Figure 1. (A) the diffusion policy collapses over training; (B) positive control -- the same head is bimodal on bimodal supervision; (C) the supervised WTA fix fans, it does not split; (D) every nuPlan CLS outcome is saturated.*
+
 ## 1. Motivation
 
 The case for generative (diffusion) planners over deterministic regressors rests heavily on

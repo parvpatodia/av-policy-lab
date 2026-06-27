@@ -1,3 +1,5 @@
+> **Frontier result:** see [docs/frontier/PAPER.md](docs/frontier/PAPER.md) -- *When Multimodality Doesn't Help: A Diagnostic of Diffusion Planners on nuPlan Closed-Loop* (Dauner-lineage negative result; collapse + saturation).
+
 # av-policy-lab
 
 A controlled study of when generative (diffusion) planners actually beat
