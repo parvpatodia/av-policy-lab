@@ -1,0 +1,44 @@
+{
+  "n_scenes": 500,
+  "reward_summary": {
+    "expert": {
+      "n": 500,
+      "mean_R": 0.146,
+      "median_R": 0.409
+    },
+    "offroute": {
+      "n": 500,
+      "mean_R": -2.609,
+      "median_R": -2.435
+    },
+    "collision": {
+      "n": 500,
+      "mean_R": -0.686,
+      "median_R": -0.427
+    },
+    "jerky": {
+      "n": 500,
+      "mean_R": -0.91,
+      "median_R": -0.794
+    },
+    "reversed": {
+      "n": 500,
+      "mean_R": -0.736,
+      "median_R": -0.582
+    }
+  },
+  "expert_beats_perturbation_frac": {
+    "offroute": 1.0,
+    "collision": 0.852,
+    "jerky": 0.95,
+    "reversed": 0.942
+  },
+  "expert_components_mean": {
+    "prog": 0.566,
+    "coll": 0.131,
+    "offroute_m": 2.941,
+    "off_pen_m": 0.319,
+    "comfort": 0.512
+  },
+  "GATE_RL_1_PASS": true
+}

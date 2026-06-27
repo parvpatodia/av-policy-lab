@@ -680,3 +680,23 @@ GRPO: diversity + SAFETY/realism, so diversity becomes scene-adaptive and plausi
 real capstone; or (b) data with genuine multiple-futures-per-scene (not available in nuPlan single-log
 imitation). This is itself a clean constructive result: it explains WHY DIVER needs RL, and bounds what
 supervised training can do on this data. Artifacts: wta_derisk_train.py (wta_div_loss), wta_div_probe6k.json.
+
+## ADR-038 — RL capstone GATE-RL-1 PASSED: validated open-loop proxy reward (2026-06-27)
+The positive-experiment RL path (Parv chose "the real positive experiment") needs a per-sample
+reward; closed-loop CLS is too expensive, so built an OPEN-LOOP proxy reward (reward_proxy.py) from
+scene tensors, reusing f4_score machinery: R = w_prog*progress_along_route - w_coll*collision_risk
+(vs agent CTRV rollouts, time-aligned) - w_off*off_route(hinge) - w_comf*discomfort.
+Validation (N=500 scenes): the EXPERT (ego_future) beats perturbations -- offroute 0.90, collision
+0.87, jerky 0.95, reversed 0.94 (all > 0.8 gate); expert is the only positive-median category
+(median R +0.24). GATE-RL-1 PASS.
+Three reward bugs diagnosed + fixed en route (the gate doing its job): (1) offroute used point-to-
+VERTEX not point-to-SEGMENT distance (overestimated for sparsely-sampled route polylines);
+(2) the route polyline is SYSTEMATICALLY ~3 m laterally offset from the ego path -- diagnosed
+directly (route Y ~+3 vs ego Y ~0 in every scene), a frame/centerline offset NOT off-road driving ->
+added a tolerance HINGE (penalize only deviation beyond 4 m) so the expert pays ~0 and gross
+departures penalize; (3) collision sigma 2.0 -> 1.0 so safe passing (2-3 m) does not fire, only
+genuine near-overlap (<1.5 m).
+NEXT: GATE-RL-2 -- a reward-weighted / GRPO update on the multi-hypothesis head; confirm modes shift
+toward higher reward AND diversity becomes SCENE-ADAPTIVE (more spread at decision types than at
+stationary -- the ADR-037 failure inverted). Artifacts: reward_proxy.py, reward_gate1.json,
+SPEC-rl-capstone.md, SPEC-positive-experiment.md.
