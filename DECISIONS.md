@@ -656,3 +656,27 @@ reliable per-scene estimate is the full-scene-conditioned WTA fan (Finding 5 / A
 on the entire scene gives a ~2-5 m fan that does not split into modes -> the per-scene future is
 largely scene-determined. This strengthens (does not weaken) the central diagnostic; it just rests it
 on the trustworthy estimator. Artifacts: available_multimodality_v2.py, available_v2.json.
+
+## ADR-037 — Positive-experiment GATE-1: supervised diversity manufactures uniform modes; supervised fixes exhausted (2026-06-27)
+Goal (Parv: "the real positive experiment"): a genuinely multimodal policy (treatment PRESENT) for an
+H1 re-test. Cheapest path tested first = diversity-regularized WTA (relaxed-WTA best-of-M + inter-mode
+REPULSION to lane width + winner CE; wta_derisk_train.py wta_div_loss, --diversity-weight 2.0
+--div-margin 0.35, one route cell, 16k scenes, 4k steps).
+Result (wta_div_probe6k.json, N=6000): repulsion DOES create distinct modes -- frac>=2 = 1.0,
+frac>=3 = 1.0, mean 5.8 / max 6 distinct modes/scene, endpoint dispersion median 5.57 m (vs plain WTA
+1.77 m, collapsed diffusion 0.13 m). BUT it FAILS the quality bar:
+- accuracy degraded: best-of-M minADE 0.35 -> 0.66 m (1.9x; gate <=1.5x), minFDE 1.38 m.
+- diversity is SCENE-INAPPROPRIATE (the decisive tell): dispersion is HIGHER at trivial scenes
+  (stationary 6.47 m, stopping_with_lead 6.43 m, stationary_in_traffic 6.29 m) than at genuine
+  decision points (on_intersection 5.55 m, traversing_traffic_light_intersection 5.64 m) -- BACKWARDS
+  from real ambiguity. A fixed repulsion forces ~6 spread modes everywhere, even for a stopped car.
+Verdict: GATE-1 FAILS. Supervised diversity MANUFACTURES diversity decoupled from scene ambiguity; it
+cannot recover genuine scene-conditioned multimodality from single-future data, because there is no
+per-scene ambiguity signal to make diversity adaptive. Together with WTA fanning (ADR-032), the
+SUPERVISED fixes are EXHAUSTED: no-repulsion -> unimodal fan; strong-repulsion -> uniform manufactured
+modes. Neither yields useful scene-appropriate multimodality.
+Consequence: a genuinely-treated H1 re-test requires either (a) RL with a designed reward (DIVER-style
+GRPO: diversity + SAFETY/realism, so diversity becomes scene-adaptive and plausible) -- multi-day, the
+real capstone; or (b) data with genuine multiple-futures-per-scene (not available in nuPlan single-log
+imitation). This is itself a clean constructive result: it explains WHY DIVER needs RL, and bounds what
+supervised training can do on this data. Artifacts: wta_derisk_train.py (wta_div_loss), wta_div_probe6k.json.

@@ -11,6 +11,29 @@ from models.scene_encoder import SceneEncoder, SceneEncoderConfig
 from models.policy_heads import WTAHead, HeadConfig
 from models.f0_dataset import scale_future
 from training.train_policy import wta_loss, ENCODER_KEYS
+import torch.nn.functional as F
+
+
+def wta_div_loss(head, memory, fut, eps, div_w, margin):
+    """Relaxed-WTA best-of-M regression + winner CE + explicit inter-mode REPULSION.
+    The repulsion penalizes endpoint pairs CLOSER than `margin` (scaled units; lane
+    width 3.5 m -> 0.35), pushing the M hypotheses toward distinct maneuvers WITHOUT
+    over-spreading. WHY: supervised WTA alone fans but does not split (ADR-032); this
+    tests whether an explicit diversity term yields genuinely distinct, still-accurate
+    modes, or wrecks accuracy/plausibility (-> need a realism/RL constraint)."""
+    trajs, scores = head(memory, goal=None)                 # (B,M,H,3),(B,M)
+    err = ((trajs - fut.unsqueeze(1)) ** 2).mean(dim=(2, 3))  # (B,M)
+    best = err.argmin(1); M = err.shape[1]
+    w = torch.full_like(err, eps / max(1, M - 1)); w.scatter_(1, best.unsqueeze(1), 1.0 - eps)
+    reg = (w * err).sum(1).mean()
+    ce = F.cross_entropy(scores, best)
+    end = trajs[..., -1, :2]                                # (B,M,2) scaled endpoints
+    D = (end.unsqueeze(1) - end.unsqueeze(2)).norm(dim=-1)  # (B,M,M)
+    iu = torch.triu_indices(M, M, 1)
+    pd = D[:, iu[0], iu[1]]                                 # (B, M*(M-1)/2)
+    rep = torch.relu(margin - pd).mean()                   # penalize pairs closer than margin
+    return reg + 0.1 * ce + div_w * rep, reg.item(), rep.item()
+
 
 def load_scenes(shard_glob, n):
     shards = sorted(glob.glob(shard_glob))
@@ -36,6 +59,10 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--wta-eps", type=float, default=0.05,
                     help="relaxed-WTA: winner weight 1-eps, rest share eps (smaller=sharper modes)")
+    ap.add_argument("--diversity-weight", type=float, default=0.0,
+                    help=">0 enables inter-mode repulsion (push endpoints apart up to --div-margin)")
+    ap.add_argument("--div-margin", type=float, default=0.35,
+                    help="target min endpoint separation, SCALED units (lane width 3.5m -> 0.35)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -57,15 +84,19 @@ def main():
         sub = {k: v[idx].to(dev) for k, v in batch_all.items()}
         fut = fut_all[idx].to(dev)
         memory = enc(sub)
-        loss = wta_loss(head, memory, None, fut, eps=a.wta_eps)
+        if a.diversity_weight > 0:
+            loss, reg_v, rep_v = wta_div_loss(head, memory, fut, a.wta_eps, a.diversity_weight, a.div_margin)
+        else:
+            loss = wta_loss(head, memory, None, fut, eps=a.wta_eps); reg_v = rep_v = -1.0
         opt.zero_grad(set_to_none=True); loss.backward()
         torch.nn.utils.clip_grad_norm_(list(enc.parameters()) + list(head.parameters()), 1.0)
         opt.step()
         if step % 500 == 0 or step == a.steps - 1:
-            print(f"step {step}: wta_loss {loss.item():.5f}  ({(time.time()-t0):.0f}s)", flush=True)
+            print(f"step {step}: loss {loss.item():.5f} reg {reg_v:.5f} rep {rep_v:.5f}  ({(time.time()-t0):.0f}s)", flush=True)
 
     torch.save({"encoder": enc.state_dict(), "head": head.state_dict(),
-                "n_modes": a.n_modes, "steps": a.steps, "n_scenes": N}, a.out)
+                "n_modes": a.n_modes, "steps": a.steps, "n_scenes": N,
+                "diversity_weight": a.diversity_weight, "div_margin": a.div_margin}, a.out)
     print("saved", a.out, flush=True)
 
 if __name__ == "__main__":

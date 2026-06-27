@@ -1,0 +1,115 @@
+{
+  "ckpt": "/scratch/patodia.pa/av-policy-lab/runs/wta_derisk/wta_div_s4000.pt",
+  "used_ema": false,
+  "n_scenes": 6000,
+  "M": 6,
+  "eps_m": 3.5,
+  "endpoint_dispersion_m": {
+    "median": 5.56529688835144,
+    "mean": 5.705267857551575,
+    "p90": 6.3971519947052,
+    "max": 6.890229225158691
+  },
+  "modes": {
+    "frac_ge2": 1.0,
+    "frac_ge3": 1.0,
+    "mean": 5.831166666666666,
+    "max": 6
+  },
+  "selected_mode_offset_from_centroid_median_m": 2.1040406227111816,
+  "minADE_bestM_m": {
+    "median": 0.6587938070297241,
+    "mean": 0.7172543406486511
+  },
+  "minFDE_bestM_m": {
+    "median": 1.3760125637054443,
+    "mean": 1.3472219705581665
+  },
+  "compare_collapsed_diffusion_disp_m": 0.131,
+  "high_sinter": {
+    "n": 1463,
+    "disp_median_m": 5.50161600112915,
+    "frac_ge2_modes": 1.0,
+    "mean_modes": 5.754613807245386,
+    "minADE_bestM_median_m": 0.700505793094635
+  },
+  "low_sinter": {
+    "n": 4537,
+    "disp_median_m": 5.615471839904785,
+    "frac_ge2_modes": 1.0,
+    "mean_modes": 5.85585188450518,
+    "minADE_bestM_median_m": 0.6469323635101318
+  },
+  "by_scenario_type_top": {
+    "stationary": {
+      "n": 225,
+      "disp_median_m": 6.467831611633301,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 6.0,
+      "minADE_bestM_median_m": 0.5628313422203064
+    },
+    "stopping_with_lead": {
+      "n": 308,
+      "disp_median_m": 6.427619218826294,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 6.0,
+      "minADE_bestM_median_m": 0.6212438344955444
+    },
+    "stationary_in_traffic": {
+      "n": 616,
+      "disp_median_m": 6.285797119140625,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 5.9772727272727275,
+      "minADE_bestM_median_m": 0.5930677652359009
+    },
+    "on_pickup_dropoff": {
+      "n": 462,
+      "disp_median_m": 5.7689831256866455,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 6.0,
+      "minADE_bestM_median_m": 0.611305296421051
+    },
+    "stationary_at_traffic_light_without_lead": {
+      "n": 154,
+      "disp_median_m": 5.737948417663574,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 5.987012987012987,
+      "minADE_bestM_median_m": 0.905760645866394
+    },
+    "on_traffic_light_intersection": {
+      "n": 77,
+      "disp_median_m": 5.734556674957275,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 5.961038961038961,
+      "minADE_bestM_median_m": 0.8990050554275513
+    },
+    "traversing_traffic_light_intersection": {
+      "n": 231,
+      "disp_median_m": 5.641262531280518,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 5.731601731601732,
+      "minADE_bestM_median_m": 0.9637474417686462
+    },
+    "near_construction_zone_sign": {
+      "n": 231,
+      "disp_median_m": 5.614724159240723,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 5.865800865800866,
+      "minADE_bestM_median_m": 0.7764939665794373
+    },
+    "on_intersection": {
+      "n": 385,
+      "disp_median_m": 5.5452880859375,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 5.825974025974026,
+      "minADE_bestM_median_m": 0.6053478717803955
+    },
+    "near_high_speed_vehicle": {
+      "n": 308,
+      "disp_median_m": 5.543523788452148,
+      "frac_ge2_modes": 1.0,
+      "mean_modes": 5.87987012987013,
+      "minADE_bestM_median_m": 0.7764620780944824
+    }
+  }
+}
