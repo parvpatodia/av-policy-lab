@@ -721,3 +721,24 @@ realistic paths. PARTIAL PASS: scene-adaptivity (the hard part) achieved; accura
 NEXT: tune for accuracy -- stronger GT anchor (0.5 -> ~2), smaller exploration sigma (0.15 -> ~0.08),
 optionally an expert-proximity reward term, to pull minADE back toward ~0.5 m while keeping scene-
 adaptive spread; then GATE-RL-3 closed-loop smoke. Artifacts: rl_train.py, rl_probe6k.json.
+
+## ADR-040 — GATE-RL-2 tuning: a present scene-adaptive multimodal policy achieved (accuracy/spread tradeoff) (2026-06-27)
+Tuned the reward-guided RL (anchor-w 0.5->1.5, sigma 0.15->0.08) to rein in the GATE-RL-2 over-spread.
+Result (rl_tuned_s1500, probe N=6000): best-of-M minADE 1.37 -> 0.768 m (recovered, sub-meter),
+dispersion median 11.84 -> 10.50 m, frac>=2 modes 1.0, mean 4.86 modes. Training reward improved
+(meanR -1.1 -> -0.4, maxR +0.5).
+Scene-adaptivity PERSISTS but COMPRESSED: top types = on_traffic_light_intersection 12.4 m,
+stationary_at_traffic_light_without_lead 12.4 m, traversing_traffic_light_intersection 11.7 m (all
+genuine decision points -- go/stop, turn options) vs near_pedestrian_on_crosswalk 10.8 m (range
+10.8-12.4 vs untuned 11.6-18.0). So an anchor-strength TRADEOFF: anchor 0.5 = strong scene-adaptivity
++ poor accuracy (1.37 m); anchor 1.5 = weaker scene-adaptivity + good accuracy (0.77 m).
+VERDICT: GATE-RL-2 QUALIFIED PASS -- a PRESENT, scene-adaptive multimodal policy now exists (sub-meter
+best-of-M, ~5 distinct modes, diversity concentrated at genuine decision points). best-of-M 0.77 vs
+unimodal 0.35 m is expected for a 6-mode policy (modes cover alternatives, not all hug the expert).
+This is the treatment the H1 re-test needs. Two usable operating points (rl_s1500 high-diversity,
+rl_tuned_s1500 high-accuracy).
+CRITICAL CAVEAT / next test: optimizing against the OPEN-LOOP proxy reward risks REWARD-HACKING
+(spread trajectories that score on the proxy but drive badly closed-loop). GATE-RL-3 = closed-loop
+smoke (wrap the multi-hypothesis head as a planner with a mode-committing selector = top-scored mode;
+run the real nuPlan sim on a few scenarios; confirm it drives + CLS is sane) is the decisive
+validation BEFORE any full retrain/eval. Artifacts: rl_train.py, rl_tuned_probe6k.json.
