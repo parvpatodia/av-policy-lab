@@ -30,7 +30,7 @@ import numpy as np
 # a lead at mid-headway is longitudinal regulation, not a yield-or-go
 # decision. Only path-crossing PrET events and the stationary-pedestrian
 # override remain in S_inter.
-F4_VERSION = "1.1"
+F4_VERSION = "1.2"
 PRET_CENTER_S = 2.5
 PRET_WIDTH_S = 1.5
 LATERAL_GATE_M = 3.0         # used by the red-light suppressor proximity test
@@ -49,6 +49,12 @@ S_LANE_WEIGHT = 0.5
 BRANCH_CAP = 3
 LANE_CAP = 2
 HIST_DT_S = 0.1              # agents history is 10 Hz
+# v1.2 (ADR-035): the 2-point heading-rate over a 0.1 s baseline is noise-dominated
+# (a ~2 deg position-jitter -> ~20 deg/s), and CTRV extrapolated 5 s manufactured
+# ~59% of high-F4 crossings (S_INTER_DIAGNOSTIC / ADR-024). Deadband sub-noise-floor
+# rates to a straight rollout; clamp implausible single-estimate spikes.
+HR_DEADBAND_RAD_S = 0.05    # ~2.9 deg/s; below this, treat the agent as going straight
+HR_MAX_RAD_S = 0.35         # ~20 deg/s; clamp magnitude of any retained turn rate
 
 
 @dataclass
@@ -148,6 +154,10 @@ def _agent_state(agents_row: np.ndarray, mask_row: np.ndarray,
         h2 = math.atan2(agents_row[k2, 2], agents_row[k2, 3])
         dh = math.atan2(math.sin(h - h2), math.cos(h - h2))
         hr = dh / (HIST_DT_S * (k - k2))
+        if abs(hr) < HR_DEADBAND_RAD_S:          # v1.2: kill noise-floor curvature
+            hr = 0.0
+        else:
+            hr = math.copysign(min(abs(hr), HR_MAX_RAD_S), hr)
     onehot = agents_row[k, 6:9]
     return {"xy": np.array([x, y]), "h": h, "v": v, "hr": hr,
             "is_ped": bool(np.argmax(onehot) == 1) if onehot.any() else False}

@@ -615,3 +615,26 @@ the cause of the null. Combined verdict across ADR-029/033/034: H1 is genuinely 
 study could not have shown it anyway under treatment-collapse; the contribution is the diagnostic +
 the corrected, ceiling-robust inference. Artifacts: moderation_slices.py; results
 docs/frontier/results/slices_r0.json, slices_r1.json.
+
+
+## ADR-035 — S_inter v1.2 (heading-rate deadband/clamp): artifact removed, null robust to the moderator fix (2026-06-27)
+Closes the last CRITICAL audit item (the unfixed S_inter curvature artifact). Root cause in code:
+f4_score._agent_state estimated the agent heading-rate hr from the last 2 valid points over a 0.1 s
+baseline, so position jitter (~2 deg) became ~20 deg/s, and the 5 s CTRV rollout bent it into fake
+crossings (~59% of high-F4 mass, S_INTER_DIAGNOSTIC/ADR-024). FIX: HR_DEADBAND_RAD_S=0.05 (sub-noise
+-floor -> straight rollout) + HR_MAX_RAD_S=0.35 clamp; F4_VERSION 1.1->1.2. Cheap recompute (no map
+pass): only s_inter changed, so recompute it (score_f4 pass_shards, patched) and recombine with the
+stored, unchanged s_branch/s_lane/g_stop. WHY s_lane=0 in the recombine: v1.1 (ADR-016) DROPPED S_lane
+from the scalar; combine() still accepts it (audit m1 footgun) -- passing the stored raw s_lane
+resurrects the deprecated v1.0 formula (caught: it inflated F4 mean 0.22->0.47). Guard: reproduce v11
+f4 from components with s_lane=0 first (max_err 0.0), then change only s_inter.
+
+Impact: of 979 high(v11) s_inter scenes, median s_inter 0.907->0.774 and 34.9% drop below 0.5
+(artifact confirmed + removed); s_inter changed in 1234 tokens; F4 mean 0.222->0.209.
+
+Clean-moderator (v1.2) re-analysis (wild-cluster bootstrap, both modes) -- the verdict is ROBUST to
+the fix: contrast NULL on CLS (r0 beta1=-0.0025 p=0.77 TOST-EQUIVALENT; r1 beta1=+0.011 p=0.16) and on
+all PDM sub-components. NOTE the comfort-in-reactive signal flagged earlier (v1.1 p=0.011) does NOT
+replicate under v1.2 (p=0.20): it was 1 of ~14 tests and specification-dependent -> noise, not a
+result. So no secondary signal survives the moderator correction; the null is clean. Artifacts:
+f4_score.py (v1.2), recombine_f4_v12.py, f4_scores_v12.json, remod_v12_r{0,1}.json.

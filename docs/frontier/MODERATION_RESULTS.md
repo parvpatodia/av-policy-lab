@@ -108,9 +108,9 @@ ceiling removal. (POWER_ANALYSIS.md remains valid as the a-priori design calcula
 
 ## Secondary observations (not the pre-registered hypothesis)
 
-- Under reactive agents, diffusion's *comfort* advantage grows with interaction-criticality
-  (contrast beta1 +0.0146, wild-cluster p=0.011) — but this is 1 of ~14 outcome tests and comfort is
-  near-binary, so it does not survive multiple-comparison correction. Suggestive only.
+- A comfort-in-reactive signal appeared under the v1.1 moderator (contrast beta1 +0.0146, p=0.011)
+  but does NOT replicate under the corrected v1.2 moderator (ADR-035: p=0.20); it was 1 of ~14 tests
+  and specification-dependent -> noise, not a result. No secondary signal survives the moderator fix.
 - Diffusion shows a small mean CLS edge in reactive-precise (+0.0037, CI [+0.0017, +0.0057]).
 
 ## Reproducibility
