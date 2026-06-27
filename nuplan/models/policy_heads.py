@@ -172,3 +172,36 @@ class DiffusionHead(nn.Module):
     ) -> torch.Tensor:
         x = self.in_proj(x_t) + self._t_embed(t).unsqueeze(1)
         return self.trunk(x, memory, goal)
+
+
+class WTAHead(nn.Module):
+    """Winner-take-all multi-hypothesis twin: M trajectory modes from learned
+    mode embeddings on the shared trunk, plus a per-mode confidence score.
+
+    WHY: single-future x0-MSE / regression collapses to the conditional mean
+    (ADR-029/030); a relaxed winner-take-all (min-over-modes) loss lets the M
+    hypotheses specialize to the distinct logged futures present in the data
+    (ADR-031), recovering the multimodality plain imitation discards. REF:
+    MultiPath (arXiv:1910.05449), MTR (arXiv:2209.13508), relaxed-WTA
+    (Rupprecht et al., arXiv:1612.00197)."""
+
+    def __init__(self, cfg: HeadConfig | None = None, n_modes: int = 6):
+        super().__init__()
+        self.cfg = cfg = cfg or HeadConfig()
+        self.M = n_modes
+        d = cfg.d_model
+        self.queries = nn.Parameter(torch.randn(cfg.horizon, d) * 0.02)
+        self.mode_emb = nn.Parameter(torch.randn(n_modes, d) * 0.02)
+        self.trunk = TrajectoryTrunk(cfg)
+        self.score_mlp = nn.Sequential(nn.Linear(d, d), nn.ReLU(), nn.Linear(d, 1))
+
+    def forward(self, memory: torch.Tensor, goal: torch.Tensor | None = None):
+        """memory (B,L,d) -> trajs (B,M,H,3), scores (B,M)."""
+        B, d = memory.shape[0], self.cfg.d_model
+        ctx = memory.mean(dim=1)  # (B,d) pooled context for scoring
+        trajs, scores = [], []
+        for m in range(self.M):
+            x = self.queries.unsqueeze(0).expand(B, -1, -1) + self.mode_emb[m].view(1, 1, d)
+            trajs.append(self.trunk(x, memory, goal))                 # (B,H,3)
+            scores.append(self.score_mlp(ctx + self.mode_emb[m].view(1, d)))  # (B,1)
+        return torch.stack(trajs, dim=1), torch.cat(scores, dim=1)    # (B,M,H,3),(B,M)

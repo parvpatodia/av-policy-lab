@@ -497,3 +497,13 @@ committing selector + re-run moderation with the validated Signal A moderator an
 ceiling) is viable. Decision deferred to Parv (multi-day compute, LEARN-mode "decide later" item);
 staged de-risk plan: train ONE WTA route cell + probe before committing the full retrain.
 Artifact: available_multimodality.py; result /scratch/.../av-policy-lab/avail_mm_result.json.
+
+### ADR-031 addendum — k-sensitivity (intellectual honesty) (2026-06-27)
+Available-multimodality grows monotonically with k (larger neighborhoods pull in less-similar
+contexts -- the upper-bound caveat made quantitative). Available endpoint dispersion / frac>=2 modes
+by k (N=4000): k=2 0.79m/0.128; k=4 1.44m/0.246; k=8 2.20m/0.354; k=16 3.14m/0.463; k=32 5.78m/0.637.
+The CONSERVATIVE FLOOR (k=2, single nearest neighbor) = 0.79m / 12.8% >=2 modes -- still ~6x the
+collapsed policy's 0.13m / 0.05%. So genuine conditional multimodality exists even at the tightest
+context matching; the k=16 headline (3.14m / 46%) is an upper-leaning estimate inflated by
+less-similar neighbors. The conclusion (multimodality present, policy discards it, Tier 3 viable)
+holds at the conservative floor.

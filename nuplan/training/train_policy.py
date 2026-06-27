@@ -34,6 +34,7 @@ from models.policy_heads import (
     DeterministicHead,
     DiffusionHead,
     HeadConfig,
+    WTAHead,
     build_precise_goal,
 )
 from models.samplers import ddim_sample
@@ -91,7 +92,8 @@ class EMA:
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--head", choices=("det", "diff"), required=True)
+    p.add_argument("--head", choices=("det", "diff", "wta"), required=True)
+    p.add_argument("--n-modes", type=int, default=6, help="WTA: number of hypotheses")
     p.add_argument("--goal", choices=("route", "precise"), required=True)
     p.add_argument("--data-root", type=Path, required=True)
     p.add_argument("--ckpt-dir", type=Path, required=True)
@@ -132,7 +134,12 @@ def build_models(args):
     random.seed(args.seed)
     encoder = SceneEncoder(SceneEncoderConfig())
     head_cfg = HeadConfig()
-    head = DeterministicHead(head_cfg) if args.head == "det" else DiffusionHead(head_cfg)
+    if args.head == "det":
+        head = DeterministicHead(head_cfg)
+    elif args.head == "wta":
+        head = WTAHead(head_cfg, n_modes=args.n_modes)
+    else:
+        head = DiffusionHead(head_cfg)
     schedule = CosineSchedule(T=head_cfg.T)
     return encoder, head, schedule
 
@@ -142,11 +149,29 @@ def goal_from_batch(args, fut_scaled: torch.Tensor):
     return build_precise_goal(fut_scaled) if args.goal == "precise" else None
 
 
+def wta_loss(head, memory, goal, fut_scaled, eps: float = 0.05):
+    """Relaxed winner-take-all: the closest mode gets weight (1-eps), the rest
+    share eps -> hypotheses specialize while none die. Plus CE on the winner so
+    the score head ranks modes for closed-loop selection. WHY relaxed not hard
+    WTA: hard WTA leaves never-winning modes untrained (dead hypotheses)."""
+    trajs, scores = head(memory, goal=goal)                          # (B,M,H,3),(B,M)
+    err = ((trajs - fut_scaled.unsqueeze(1)) ** 2).mean(dim=(2, 3))  # (B,M)
+    best = err.argmin(dim=1)                                         # (B,)
+    M = err.shape[1]
+    w = torch.full_like(err, eps / max(1, M - 1))
+    w.scatter_(1, best.unsqueeze(1), 1.0 - eps)
+    reg = (w * err).sum(dim=1).mean()
+    ce = nn.functional.cross_entropy(scores, best)
+    return reg + 0.1 * ce
+
+
 def compute_loss(args, head, schedule, memory, fut_scaled):
     goal = goal_from_batch(args, fut_scaled)
     if args.head == "det":
         pred = head(memory, goal=goal)
         return nn.functional.mse_loss(pred, fut_scaled)
+    if args.head == "wta":
+        return wta_loss(head, memory, goal, fut_scaled)
     t = torch.randint(0, schedule.alphas_cumprod.shape[0], (fut_scaled.shape[0],),
                       device=fut_scaled.device)
     eps = torch.randn_like(fut_scaled)
@@ -171,6 +196,8 @@ def evaluate(args, encoder, head, schedule, loader, device) -> dict:
         goal = goal_from_batch(args, fut_scaled)
         if args.head == "det":
             pred = head(memory, goal=goal).unsqueeze(1)            # (B,1,H,3)
+        elif args.head == "wta":
+            pred = head(memory, goal=goal)[0]                      # (B,M,H,3)
         else:
             pred = ddim_sample(head, schedule, memory, goal=goal,
                                num_samples=args.val_k,
