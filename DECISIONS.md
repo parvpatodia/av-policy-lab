@@ -549,3 +549,43 @@ converged by ~step 500), M=6; a full-budget retrain could shift the 2-3% margina
 data-bottleneck trend makes a maneuver-level multimodal policy unlikely from this recipe.
 Artifacts: wta_derisk_train.py, wta_probe.py; results /scratch/.../wta_derisk_probe6k.json,
 wta_derisk_eps01_probe6k.json.
+
+## ADR-033 — Definitive re-analysis: pre-registered inference + sub-component sensitivity; the null is real but metric-SATURATED (2026-06-27)
+Closes audit items B (pre-registered stats never shipped), E (CLS-ceiling alternative), and tightens
+A (overclaim). Built analyze_moderation_v2.py (scenario_type FIXED EFFECTS + restricted WILD-CLUSTER
+bootstrap SE/p by scenario_type, Cameron-Gelbach-Miller; + TOST equivalence, Lakens) and
+merge_eval_full.py (re-merge keeping all PDM sub-components + real scenario_type; the original
+merge_eval kept only the composite and clobbered scenario_type). Wild-cluster bootstrap SELF-TEST
+passed (Type-I 0.025 under a clustered null = properly conservative, vs plain HC3 which is
+anticonservative here; full power under a true effect). N=800/cell, 3 seeds each, both reactive modes.
+
+HEADLINE (route-minus-precise F4-slope contrast, the H1 test):
+- composite CLS: r0 beta1=-0.0028 clSE=0.0082 wild-cluster p=0.72 (TOST-EQUIVALENT at 0.02);
+  r1 beta1=+0.0025 p=0.83. NULL, now under the registered inference.
+- ALL sub-components null too (progress, TTC, collisions, drivable-area, comfort, making-progress),
+  EXCEPT one honest secondary: ego_is_comfortable r1 beta1=+0.0146 wild-cluster p=0.011 (diffusion's
+  comfort edge grows with interaction-criticality under reactive agents). Does NOT survive multiple-
+  comparison correction (~14 tests; Bonferroni 0.0036) and comfort is near-binary -> SUGGESTIVE only.
+
+RIGOR WIN (why the registered method matters): on drivable_area_compliance r0 the naive HC3 that
+SHIPPED gives beta1=-0.0243 se=0.0134 (t=-1.8, ~"marginally significant"); the correct wild-cluster
+bootstrap gives p=0.188 (NULL). The shipped HC3 was anticonservative and would have reported a
+spurious effect. Cluster SEs are systematically larger (e.g. comfort r1 0.0064 vs HC3 0.0042).
+
+THE DEEPER FINDING (sensitivity analysis result, empirically confirms audit-E): the sub-components
+are NOT more sensitive than the composite -- they are MORE ceilinged. Frac at ceiling (>=0.99), pooled
+4 cells: CLS 0.41-0.53; ego_progress 0.69-0.72; ego_is_comfortable 0.99-1.00; drivable_area 0.83-0.85;
+TTC 0.54-0.67; collisions 0.58-0.72. The only continuous open-loop metric (ego_expert_L2_error) is
+ALL-NaN in closed-loop sim. => the standard nuPlan closed-loop metric suite is SATURATED for these
+policies; it cannot express a fine-grained moderation effect even if one existed.
+
+REVISED CONCLUSION (supersedes the "informative null that rules out" framing of MODERATION_RESULTS):
+H1 cannot be answered on standard nuPlan CLS for two INDEPENDENT reasons, each sufficient to block
+detection: (1) treatment collapse -- the diffusion policy is a near-copy of the deterministic one
+(ADR-029); (2) metric saturation -- every outcome is at ceiling (this ADR). The honest contribution
+is therefore a measurement/method result in the Dauner "Parting with Misconceptions" (CoRL 2023)
+lineage and consistent with the nuPlan-too-easy / reactive / long-tail literature (nuPlan-R, interPlan):
+testing fine-grained planner-quality hypotheses on standard nuPlan CLS is confounded by treatment-
+collapse AND ceiling, and needs BOTH a genuinely multimodal policy AND an unsaturated eval (harder
+scenario slice / a continuous closed-loop metric). Artifacts: analyze_moderation_v2.py,
+merge_eval_full.py; results docs/frontier/results/remod_r0.json, remod_r1.json.
