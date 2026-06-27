@@ -42,7 +42,7 @@ from nuplan.planning.simulation.trajectory.interpolated_trajectory import (
 from features.scene_features import SceneFeatureExtractor
 from models.f0_dataset import scale_future, unscale_future
 from models.policy_heads import (
-    CosineSchedule, DeterministicHead, DiffusionHead, HeadConfig,
+    CosineSchedule, DeterministicHead, DiffusionHead, HeadConfig, WTAHead,
 )
 from models.samplers import ddim_sample
 from models.scene_encoder import SceneEncoder, SceneEncoderConfig
@@ -115,7 +115,7 @@ class PolicyPlanner(AbstractPlanner):
         ddim_steps: int = 20,
         device: str = "cpu",
     ):
-        assert head_type in ("det", "diff") and goal_mode in ("route", "precise")
+        assert head_type in ("det", "diff", "wta") and goal_mode in ("route", "precise")
         if goal_mode == "precise" and scenario is None:
             raise ValueError("precise goal conditioning needs the log scenario")
         self._ckpt_path = ckpt_path
@@ -141,8 +141,12 @@ class PolicyPlanner(AbstractPlanner):
                         weights_only=False)
         self._encoder = SceneEncoder(SceneEncoderConfig()).to(self._device)
         cfg = HeadConfig()
-        self._head = (DeterministicHead(cfg) if self._head_type == "det"
-                      else DiffusionHead(cfg)).to(self._device)
+        if self._head_type == "det":
+            self._head = DeterministicHead(cfg).to(self._device)
+        elif self._head_type == "wta":
+            self._head = WTAHead(cfg).to(self._device)
+        else:
+            self._head = DiffusionHead(cfg).to(self._device)
         self._used_ema = load_ema_into(self._encoder, self._head, ck)
         self._encoder.eval(), self._head.eval()
         self._schedule = CosineSchedule(T=cfg.T).to(self._device)
@@ -216,6 +220,12 @@ class PolicyPlanner(AbstractPlanner):
             memory = self._encoder(batch)
             if self._head_type == "det":
                 traj_scaled = self._head(memory, goal=goal)[0]
+            elif self._head_type == "wta":
+                # mode-committing selector (ADR-029 #1c): execute the TOP-SCORED
+                # mode (not the medoid) -- the point of a multimodal policy is to
+                # commit to a chosen maneuver, not average the alternatives.
+                trajs, scores = self._head(memory, goal=goal)
+                traj_scaled = trajs[0, scores[0].argmax()]
             else:
                 gen = torch.Generator(device=self._device).manual_seed(
                     current_input.iteration.index)
