@@ -97,7 +97,7 @@ def build_cfg(args, exp_name: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--planner", choices=("policy", "idm", "log_future", "pdm_closed"), required=True)
-    ap.add_argument("--head", choices=("det", "diff"), default=None)
+    ap.add_argument("--head", choices=("det", "diff", "wta"), default=None)
     ap.add_argument("--goal", choices=("route", "precise"), default=None)
     ap.add_argument("--ckpt", default=None)
     ap.add_argument("--tokens-file", default=None)
