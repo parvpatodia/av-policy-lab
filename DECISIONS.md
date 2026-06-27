@@ -444,3 +444,25 @@ Scope / honesty notes:
 
 Artifacts: nuplan/analysis/{multimodality_probe.py, compare_det_diff.py}; per-config JSON
 mm_diff_route_*.json + cmp_detdiff_route_seed0.json in /scratch/.../av-policy-lab/.
+
+## ADR-030 — Diffusion architecture CAN represent multimodality; the collapse is a data property (Exp 0) (2026-06-27)
+Finding: a controlled synthetic-bimodal test proves the DiffusionHead + x0-MSE + DDIM (the exact
+objective and sampler used in this lab) recovers a multimodal conditional WHEN the supervision is
+multimodal. So the ADR-029 collapse is NOT a model/objective/sampler defect; it is a property of
+single-future-per-scene imitation (nuPlan logs one future per scenario -> the learned conditional is
+correctly ~unimodal).
+Setup (nuplan/analysis/synth_bimodal_test.py): 32 synthetic contexts (random fixed `memory`, encoder
+bypassed), each mapping 50/50 to two mirrored arc futures 24 m apart (>> 3.5 m lane). Train the
+DiffusionHead with the SAME x0-MSE + CosineSchedule(T=100) as train_policy.compute_loss (4000 steps,
+Adam 1e-3). DDIM-sample K=64/context (20 steps); measure mode recovery (union-find eps=3.5 m).
+Result: modes mean 2.0, frac>=2 modes 1.0, samples split 50/50 across the two arcs (near-A 0.50,
+near-B 0.50), ZERO mass at the collapse midpoint (0.00), both modes covered in 100% of contexts,
+endpoint dispersion 12.96 m (~ the arc separation), train loss 0.024. Smoke (C=4/200 steps) already
+decisive; the full run confirms with a perfect split.
+Consequence: the architecture is sound -> a genuinely multimodal AV policy requires multimodality in
+the SUPERVISION. Whether it exists (similar real contexts -> materially different logged futures,
+esp. at interaction-critical scenes) is the gating question = Experiment 1 (SPEC drafted; f0_v3
+shards carry ego_future + scenario_token + scenario_type, so it is feasible CPU-only). #2/#3 on the
+collapsed checkpoints remain not worth compute. The Tier-3 retrain (multi-day) decision is deferred
+to Parv pending Experiment 1 evidence on whether there is multimodal supervision to capture.
+Artifact: synth_bimodal_test.py; result /scratch/.../av-policy-lab/synth_bimodal_result.json.
