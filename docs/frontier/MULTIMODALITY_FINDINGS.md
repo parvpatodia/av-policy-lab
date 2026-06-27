@@ -57,10 +57,26 @@ dispersion + mode count = the conditional spread the data actually carries.
 - concentrated at decision points: stationary-at-traffic-light 4.4 modes (100% >=2), light
   intersections 3.9, construction 3.2, long-vehicle 3.7; vs low-speed 1.8.
 
-## Consequence and next step
-The four findings cohere: standard imitation gives the diffusion policy nothing multimodal to learn
-per scene, so it collapses; the moderation therefore measured an absent treatment. The data does
-carry the multimodality (at decision points), so capturing it is possible. Tier-3 (in progress):
-a winner-take-all multi-hypothesis head (`WTAHead`) trained to recover the discarded multimodality,
-de-risked on one cell before any full retrain; if it produces genuinely multimodal, closed-loop
-trajectories, the moderation is re-run against a PRESENT treatment.
+## Finding 5 — the standard fix (WTA) yields a wider fan, not distinct modes; the future is largely determined (ADR-032)
+De-risk before any multi-day retrain: a winner-take-all multi-hypothesis head (`WTAHead`, M=6),
+trained on 16k real scenes with the same encoder + x0-loss, two assignment-sharpness settings
+(`wta_derisk_train.py` + `wta_probe.py`, N=6000):
+- eps=0.05: endpoint dispersion 1.77 m (14x the collapsed diffusion's 0.13 m), best-of-M minADE
+  0.35 m, but frac>=2 modes = 0 in every scenario type at lane width.
+- eps=0.01 (sharper): the fan WIDENED to 4.65 m but frac>=2 modes is still only 2.3% (max 3), even
+  at decision points (traffic-light intersection 5.0 m spread, 3.5% >=2 modes). Sharpening inflated
+  the fan width, it did not split it.
+Robust verdict: WTA is a well-fit UNIMODAL predictor with adjustable spread, not a maneuver-level
+multimodal policy on this data. Only ~2-3% of scenes are genuinely multimodal; the bottleneck is the
+data, not the method.
+
+## Consequence
+The five findings cohere into a single, contrarian result. For richly-conditioned nuPlan planning,
+the per-scene future is largely DETERMINED by the scene (agents, map, route, traffic lights): the
+diffusion policy collapses (F2) not by defect (F3) but because there is little per-scene multimodality
+to learn; the "available multimodality" across similar contexts (F4) is mostly residual context
+variation, not per-scene ambiguity; and the standard multimodality fix (F5, WTA) fans rather than
+splits. So the much-assumed multimodal benefit of diffusion / multi-hypothesis planners is largely
+absent here, which is why the interaction-criticality moderation (F1) is a well-powered null. The
+multi-day Tier-3 retrain + re-moderation is NO-GO: it would test a treatment present in ~2-3% of
+scenes and reproduce a near-null. The contribution is this diagnostic arc, end to end.
