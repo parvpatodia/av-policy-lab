@@ -70,13 +70,30 @@ Robust verdict: WTA is a well-fit UNIMODAL predictor with adjustable spread, not
 multimodal policy on this data. Only ~2-3% of scenes are genuinely multimodal; the bottleneck is the
 data, not the method.
 
-## Consequence
-The five findings cohere into a single, contrarian result. For richly-conditioned nuPlan planning,
-the per-scene future is largely DETERMINED by the scene (agents, map, route, traffic lights): the
-diffusion policy collapses (F2) not by defect (F3) but because there is little per-scene multimodality
-to learn; the "available multimodality" across similar contexts (F4) is mostly residual context
-variation, not per-scene ambiguity; and the standard multimodality fix (F5, WTA) fans rather than
-splits. So the much-assumed multimodal benefit of diffusion / multi-hypothesis planners is largely
-absent here, which is why the interaction-criticality moderation (F1) is a well-powered null. The
-multi-day Tier-3 retrain + re-moderation is NO-GO: it would test a treatment present in ~2-3% of
-scenes and reproduce a near-null. The contribution is this diagnostic arc, end to end.
+## Finding 6 — corrected inference + ceiling-robustness (ADR-033/034)
+The original "well-powered informative null that rules out the moderation" claim is RETRACTED. Under
+the pre-registered inference the first analysis omitted (scenario_type fixed effects + wild-cluster
+bootstrap + TOST; bootstrap self-test-validated), the headline contrast is null in both modes (r0
+p=0.72, TOST-equivalent to 0; r1 p=0.83), and the corrected method overturns a spurious HC3 effect
+(drivable_area r0: HC3 t=-1.8 -> wild-cluster p=0.19; cluster SEs ~50% larger throughout). Every
+standard nuPlan CLS outcome is saturated (41-100% of tokens at ceiling), so the metric cannot express
+a moderated gap; but the null SURVIVES removing the ceiling (null on unsaturated hard subsets, n=200-
+649, frac@ceiling 0.0) and the direct H1 prediction is WRONG-SIGNED at high F4 (mean Delta_route -
+mean Delta_precise = -0.009/-0.010). So the null is real and ceiling-robust -- it reflects treatment
+collapse, not measurement.
+
+## Consequence (scoped to what the evidence earns)
+The findings cohere into one contrarian, diagnostic result. On the STANDARD nuPlan closed-loop setup
+(this scenario set, this architecture, single-future imitation + medoid selection), the assumed
+multimodal benefit of diffusion / multi-hypothesis planners is both UNREALIZED (the policy collapses
+to a unimodal point estimator, F2/F3) and UNTESTABLE AS USUALLY SET UP (treatment collapse + a
+saturated metric, F6). The "available multimodality" across similar contexts (F4) is largely residual
+context variation, and the standard supervised fix (F5, WTA) fans rather than splits -- so the
+per-scene future is mostly scene-determined. This is a measurement/method contribution in the Dauner
+"Parting with Misconceptions" (CoRL 2023) lineage; the collapse leg is independently confirmed by
+DIVER (arXiv:2507.04049). We do NOT claim multimodality is useless for driving in general -- only
+that here it is neither present nor measurable, and that demonstrating a benefit would require BOTH a
+genuinely multimodal policy (e.g. the RL route DIVER takes, not supervised WTA) AND an unsaturated
+evaluation (harder scenarios / a continuous closed-loop metric). The multi-day Tier-3 retrain +
+re-moderation is NO-GO on this data: it would test a ~2-3%-present treatment on a ceilinged metric and
+reproduce the null.
