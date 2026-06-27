@@ -352,3 +352,95 @@ freeze_manifest.py extended with a backward-compatible --exclude option to draw 
 probe. Both carry sha256 + git commit for audit. Re-freezable before the eval runs if N changes;
 immutable once the eval starts. NOTE moderator label is interaction-criticality (ADR-027), not
 "ambiguity"; the stratification F4 = g_stop*(1-(1-s_branch)(1-s_inter)) is unchanged.
+
+## ADR-029 — Diffusion policy mode-collapses to a point estimator; the #18 null is treatment-absent (2026-06-27)
+
+Finding (rigor-upgrade #1). The diffusion policy in this lab does NOT produce multimodal
+trajectories in closed loop. It collapses to a near-deterministic point estimator. This is a
+mechanistic, internal-validity finding that REFRAMES the ADR-027 / experiment-#18 moderation null:
+the experiment compared two policies that emit near-identical trajectories, so the multimodality
+"treatment" was effectively absent and the null was near-inevitable. It is NOT evidence that
+interaction-criticality fails to moderate a genuinely-multimodal-vs-unimodal gap; that question
+stays open and needs a non-collapsed policy.
+
+Evidence (all from frozen f5_2x2_v4 checkpoints, scene_shard f0, route head):
+
+1a SELECTOR (code-locked). serving/policy_planner.py compute_planner_trajectory: the diff path
+   draws K=8 DDIM samples (EMA weights, 20 steps) then select_medoid() returns the most-central
+   sample (argmin mean pairwise xy-L2); the det path is a single head forward (conditional-mean
+   trajectory). Both share identical heading-from-path post-processing. So at deployment the only
+   det-vs-diff difference is mean-point (det) vs medoid-of-8 (diff). The medoid is central by
+   construction and would collapse any multimodality at selection time. The planner header even
+   pre-flagged a mode-committing selector as a separate pre-registered variant.
+
+1b HEAD COLLAPSE (open-loop probe, nuplan/analysis/multimodality_probe.py). diff_route_seed0
+   e130 (CLS-selected), n=2000 scenes, K=32 samples/scene from the head as deployed (EMA, 20-step
+   DDIM), endpoints clustered by union-find at eps = 3.5 m (lane width):
+   - endpoint dispersion: median 0.131 m, mean 0.192 m, p90 0.315 m, max 2.42 m
+   - dispersion / mean displacement = 0.37% (mean path length 35.4 m)
+   - modes: mean 1.0005, frac>=2 modes = 0.0005 (1 of 2000), max 2
+   - medoid offset from centroid 0.012 m (the cloud is a point, so medoid == mean here)
+   K=32 noise draws land ~13 cm apart on a 35 m path: the head is a point estimator, not a
+   multimodal sampler. So 1a is moot: there is essentially no multimodality for the medoid to
+   collapse.
+
+EPOCH TRAJECTORY (seed0, n=2000, K=32). Collapse develops over training, it is not present at
+   init-then-fixed:
+     e010  disp/disp 1.76%  median 0.623 m  frac>=2 modes 1.55% (max 3 modes)
+     e050  disp/disp 0.68%  median 0.243 m  frac>=2 modes 0.00%
+     e090  disp/disp 1.03%  median 0.362 m  frac>=2 modes 0.45%
+     e130  disp/disp 0.37%  median 0.131 m  frac>=2 modes 0.05%
+     e150  disp/disp 0.22%  median 0.078 m  frac>=2 modes 0.05%
+   ~8x contraction e010 -> e150 (non-monotone wobble at e090). Early training retains modest
+   diversity (some 3-mode scenes at e010); training drives the head toward a delta function.
+
+EMA CONTROL. e130 RAW (no EMA) disp/disp 0.39% vs EMA 0.37%: near-identical. The collapse is in
+   the trained weights, not an EMA-averaging artifact, so there is no cheap deployment-time fix.
+
+CAPSTONE det-vs-diff (nuplan/analysis/compare_det_diff.py). det_route_seed0 e120 vs
+   diff_route_seed0 e130 (deployed: medoid-of-8) on the SAME 2000 scenes:
+   - det-vs-diff trajectory ADE: median 0.470 m, mean 0.580 m, p90 1.197 m, max 6.25 m
+   - ADE / mean displacement = 1.33% (35.3 m path)
+   - endpoint offset: median 1.031 m, p90 3.241 m
+   The two separately-trained networks are NOT the identical function (the det-diff gap 0.47 m is
+   ~3.6x the within-diff sample spread 0.13 m, as expected for two distinct heads), but they are
+   functionally near-equivalent: median sub-half-meter ADE, sub-lane-width endpoint, on a 35 m
+   horizon. Experiment #18 compared a policy to a near-copy of itself.
+
+GENERALITY (seeds 1, 2 at CLS-best epochs, n=2000, K=32).
+   - seed1 e150: disp/disp 0.78% (median 0.273 m, frac>=2 modes 0.00%, max 1 mode)
+   - seed2 e140: disp/disp 0.25% (median 0.087 m, frac>=2 modes 0.00%, max 1 mode)
+   All three independently-trained seeds collapse (disp/disp 0.22-0.78%, ~0% multimodal scenes).
+   Not a single-seed fluke; the collapse is a property of the training recipe.
+
+ROOT CAUSE. Mean-regression. The head is trained with x0-prediction MSE against a SINGLE
+   ground-truth future per scene. The Bayes-optimal x0 predictor under MSE is E[x0 | context], the
+   conditional mean, which is independent of the noise input; the network therefore learns to
+   ignore its sampling stochasticity and emit the mean trajectory, so K noise draws collapse to one
+   point. This is the standard regression-to-the-mean failure of single-target imitation. Genuine
+   trajectory multimodality requires either an explicit mixture / multi-hypothesis (winner-take-all)
+   loss, or training the diffusion model against a DISTRIBUTION of plausible futures rather than one
+   logged future.
+
+Decision / consequence:
+- Report this as the headline internal-validity result for the rigor-upgrade phase: the #18 null
+  is mechanistically explained (treatment absent), not a mysterious flat effect.
+- #1c (mode-committing selector) is moot until the head is multimodal; deferred.
+- The real next contribution is a training fix that yields a genuinely multimodal policy (multi-
+  future targets / winner-take-all / variance-preserving objective), then re-run the moderation
+  (#2 validated Signal A moderator, #3 lowered CLS ceiling) against a policy whose treatment is
+  actually present. Until then, no moderation claim can separate "F4 does not moderate" from
+  "there was nothing to moderate."
+
+Scope / honesty notes:
+- The probe measures GLOBAL endpoint dispersion over 2000 scenes, NOT stratified by
+  interaction-criticality as #1b was originally specified. The stratified "does multimodality rise
+  with s_inter" test is moot: frac>=2 modes = 0.0005 globally (~1 scene in 2000), so there is no
+  multimodality distribution to condition on. The collapse is unconditional.
+- Probe covers the ROUTE head only (the precise head needs the GT goal, absent from the offline
+  shard). Route is the LESS-constrained case (no goal pinning the endpoint); it still collapses, so
+  the precise head, which is additionally conditioned on the goal, collapses a fortiori. Closed-loop
+  #18 covered both conditions and showed diff~=det in both, consistent with this.
+
+Artifacts: nuplan/analysis/{multimodality_probe.py, compare_det_diff.py}; per-config JSON
+mm_diff_route_*.json + cmp_detdiff_route_seed0.json in /scratch/.../av-policy-lab/.
