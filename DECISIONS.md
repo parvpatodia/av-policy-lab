@@ -700,3 +700,24 @@ NEXT: GATE-RL-2 -- a reward-weighted / GRPO update on the multi-hypothesis head;
 toward higher reward AND diversity becomes SCENE-ADAPTIVE (more spread at decision types than at
 stationary -- the ADR-037 failure inverted). Artifacts: reward_proxy.py, reward_gate1.json,
 SPEC-rl-capstone.md, SPEC-positive-experiment.md.
+
+## ADR-039 — RL capstone GATE-RL-2: reward-guided RL achieves SCENE-ADAPTIVE diversity (partial pass) (2026-06-27)
+Built rl_train.py: AWR/GRPO on the multi-hypothesis head -- per scene/mode, perturb E times, reward
+each via the validated open-loop proxy (reward_proxy), per-scene group-relative advantage (GRPO
+baseline), AWR-regress each mode toward its advantage-weighted perturbations + GT realism anchor +
+score CE. Bounded run: sbatch 7911097 (GPU, n=4000, 1500 steps, B16/E4, sigma 0.15, anchor-w 0.5,
+warm-start plain-WTA) -> rl_s1500.pt. Training reward climbed (maxR -0.57 -> +0.4).
+Result (probe N=6000): endpoint dispersion median 11.84 m (plain WTA 1.77, diversity-reg 5.57,
+collapsed 0.13); frac>=2 modes 1.0, mean 4.74.
+KEY POSITIVE -- diversity is now SCENE-ADAPTIVE, the GATE-1/ADR-037 uniform-diversity failure
+INVERTED. Dispersion by scenario type: on_intersection 18.0 m, on_pickup_dropoff 15.8 m,
+traversing_crosswalk 15.3 m, following_lane_with_slow_lead 14.8 m (decision-heavy = TOP) vs
+stationary_in_traffic 11.6 m, low_magnitude_speed 11.7 m (trivial = BOTTOM). The reward makes the
+model spread where multiple options are good -- the mechanism supervised repulsion lacked. Confirms a
+PRESENT, scene-appropriate multimodality treatment is achievable via RL on this data.
+BUT accuracy degraded: best-of-M minADE 0.35 (plain WTA) -> 1.37 m (gate <= ~0.53). Modes over-spread
+(11.6 m even at stationary is too much); the open-loop reward is permissive so modes drift from
+realistic paths. PARTIAL PASS: scene-adaptivity (the hard part) achieved; accuracy needs tuning.
+NEXT: tune for accuracy -- stronger GT anchor (0.5 -> ~2), smaller exploration sigma (0.15 -> ~0.08),
+optionally an expert-proximity reward term, to pull minADE back toward ~0.5 m while keeping scene-
+adaptive spread; then GATE-RL-3 closed-loop smoke. Artifacts: rl_train.py, rl_probe6k.json.
