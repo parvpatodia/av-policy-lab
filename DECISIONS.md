@@ -589,3 +589,29 @@ testing fine-grained planner-quality hypotheses on standard nuPlan CLS is confou
 collapse AND ceiling, and needs BOTH a genuinely multimodal policy AND an unsaturated eval (harder
 scenario slice / a continuous closed-loop metric). Artifacts: analyze_moderation_v2.py,
 merge_eval_full.py; results docs/frontier/results/remod_r0.json, remod_r1.json.
+
+## ADR-034 — Unsaturated-subset robustness: the null is NOT a ceiling artifact (refines ADR-033) (2026-06-27)
+Closes the ADR-033 open question (is the null due to metric saturation?). moderation_slices.py re-runs
+the headline route-minus-precise F4-slope contrast on HARD / unsaturated subsets (sliced by grand
+mean CLS M=(4 cells)/4, which is ~orthogonal to the difference-of-differences contrast C, so not
+outcome-conditioning; headroom reported per slice) with the pre-registered wild-cluster bootstrap, plus
+the direct H1 paired prediction on the top-F4 quartile.
+
+Results (B=4999, both reactive modes):
+- Removing the ceiling does NOT reveal an effect. On unsaturated subsets (frac M at ceiling = 0.0,
+  real contrast spread mean|C| ~0.05) the contrast stays NULL: r0 unsat(M<0.99) beta1=+0.0011 p=0.91,
+  bottom25%-M beta1=+0.0119 p=0.58; r1 unsat beta1=+0.0056 p=0.69, bottom25% beta1=+0.0199 p=0.30.
+- The DIRECT H1 prediction is WRONG-SIGNED at its leverage point (high F4 = interaction-critical):
+  mean(Delta_route) - mean(Delta_precise) = -0.0089 r0 (CI95 [-0.0181, +0.0003]); -0.0099 r1 (CI95
+  [-0.0198, -0.0000], excludes 0). H1 predicts > 0; the data trend the OTHER way.
+- Faint non-significant positive in the hardest reactive scenes (r1 bottom25% beta1=+0.020 p=0.30) =
+  noise, not a finding.
+
+Conclusion: the null is ROBUST to the ceiling. Where there is genuine detection headroom there is
+still no moderation, and the direction is if anything reversed. So the null reflects TREATMENT
+COLLAPSE (ADR-029, diff ~= det -> mean|C| ~0.05 unstructured by F4), not metric saturation. ADR-033's
+saturation is real (it inflates SEs / removes the "informative" claim on the full sample) but is NOT
+the cause of the null. Combined verdict across ADR-029/033/034: H1 is genuinely unsupported AND the
+study could not have shown it anyway under treatment-collapse; the contribution is the diagnostic +
+the corrected, ceiling-robust inference. Artifacts: moderation_slices.py; results
+docs/frontier/results/slices_r0.json, slices_r1.json.
