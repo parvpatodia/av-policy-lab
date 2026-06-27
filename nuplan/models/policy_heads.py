@@ -196,12 +196,22 @@ class WTAHead(nn.Module):
         self.score_mlp = nn.Sequential(nn.Linear(d, d), nn.ReLU(), nn.Linear(d, 1))
 
     def forward(self, memory: torch.Tensor, goal: torch.Tensor | None = None):
-        """memory (B,L,d) -> trajs (B,M,H,3), scores (B,M)."""
-        B, d = memory.shape[0], self.cfg.d_model
-        ctx = memory.mean(dim=1)  # (B,d) pooled context for scoring
-        trajs, scores = [], []
-        for m in range(self.M):
-            x = self.queries.unsqueeze(0).expand(B, -1, -1) + self.mode_emb[m].view(1, 1, d)
-            trajs.append(self.trunk(x, memory, goal))                 # (B,H,3)
-            scores.append(self.score_mlp(ctx + self.mode_emb[m].view(1, d)))  # (B,1)
-        return torch.stack(trajs, dim=1), torch.cat(scores, dim=1)    # (B,M,H,3),(B,M)
+        """memory (B,L,d) -> trajs (B,M,H,3), scores (B,M).
+
+        WHY vectorized (one B*M trunk call, not M sequential): the modes are
+        independent given memory, so flattening (batch, mode) into one batch axis
+        runs all M hypotheses in a single forward -> ~M x faster on GPU. Row b*M+m
+        is (scene b, mode m); reshape(B,M,...) restores the axes."""
+        B, L, d = memory.shape
+        M, H = self.M, self.cfg.horizon
+        q = (self.queries.unsqueeze(0) + self.mode_emb.unsqueeze(1))      # (M,H,d)
+        q = q.unsqueeze(0).expand(B, M, H, d).reshape(B * M, H, d)        # (B*M,H,d)
+        mem = memory.unsqueeze(1).expand(B, M, L, d).reshape(B * M, L, d)  # (B*M,L,d)
+        g = None
+        if goal is not None:
+            gc = goal.shape[-1]
+            g = goal.unsqueeze(1).expand(B, M, gc).reshape(B * M, gc)     # (B*M,goal_ch)
+        trajs = self.trunk(q, mem, g).reshape(B, M, H, -1)               # (B,M,H,3)
+        ctx = memory.mean(dim=1)                                          # (B,d)
+        scores = self.score_mlp(ctx.unsqueeze(1) + self.mode_emb.unsqueeze(0)).squeeze(-1)  # (B,M)
+        return trajs, scores
