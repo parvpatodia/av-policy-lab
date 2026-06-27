@@ -507,3 +507,45 @@ collapsed policy's 0.13m / 0.05%. So genuine conditional multimodality exists ev
 context matching; the k=16 headline (3.14m / 46%) is an upper-leaning estimate inflated by
 less-similar neighbors. The conclusion (multimodality present, policy discards it, Tier 3 viable)
 holds at the conservative floor.
+
+## ADR-032 — WTA de-risk: the standard multimodality fix yields a wider FAN, not distinct modes; Tier-3 NO-GO (2026-06-27)
+Tier-3 Step-1 de-risk (Parv chose: stage before any multi-day retrain). Question: does a winner-take-
+all multi-hypothesis head recover the maneuver-level multimodality the diffusion policy discards
+(ADR-029/031)?
+Setup: standalone bounded trainer (nuplan/analysis/wta_derisk_train.py) -- SceneEncoder + WTAHead
+(M=6), 16000 real f0_v3 scenes in-memory, 4000 steps, the SAME relaxed-WTA x0-loss + encoder as the
+real cells (~3 min GPU). Probe (nuplan/analysis/wta_probe.py): M-hypothesis endpoint dispersion +
+mode count (union-find eps=3.5m lane width) + best-of-M minADE + scenario_type strata. N=6000.
+
+Result (M=6):
+- eps=0.05: dispersion median 1.77m (vs collapsed diffusion 0.13m = ~14x more diverse), best-of-M
+  minADE 0.35m (accurate), but frac>=2 modes = 0.0 in EVERY scenario type at lane width, including
+  decision-point types where ADR-031 found 4+ available modes (traversing_crosswalk 2.10m,
+  on_intersection 2.06m -- all single-cluster).
+- eps=0.01 (sharper assignment, rules out the soft-WTA confound): dispersion WIDENED to median 4.65m
+  (max 8.7m), best-of-M minADE 0.46m, but frac>=2 modes only 0.023 (2.3%, max 3) -- even at
+  decision-point types 0-3.5% (traversing_traffic_light_intersection 5.04m disp but 3.5% >=2 modes).
+  Sharpening inflated the fan WIDTH, it did not SPLIT it into distinct modes.
+
+Verdict (robust across eps): WTA does not collapse like diffusion, but it is a well-fit UNIMODAL
+predictor with adjustable spread, NOT a maneuver-level multimodal policy on this data. Only ~2-3% of
+scenes are genuinely multimodal; the trend (eps 0.05->0.01 widened the fan but barely moved frac>=2
+from 0% to 2.3%) shows the bottleneck is the DATA, not the method.
+
+Implication: supports a stronger reading of ADR-031 -- most of the kNN-neighbor "available
+multimodality" is RESIDUAL CONTEXT VARIATION across similar-but-different scenes, not per-scene
+decision ambiguity. Per scene, the rich conditioning (agents, map, route, traffic lights) largely
+DETERMINES the future, so a well-fit policy fans (predictive uncertainty) rather than splits
+(committed alternatives). This is why the diffusion policy collapsed (ADR-029) and why the #18
+moderation was near-null: for richly-conditioned nuPlan planning, the much-assumed "multimodal
+benefit" of diffusion/multi-hypothesis planners is largely absent because conditioning resolves the
+future to near-unimodal. (Contrarian, honest, and consistent across 5 lines of evidence.)
+
+Decision: NO-GO on the multi-day Tier-3 full retrain + re-moderation -- it would test a treatment
+present in ~2-3% of scenes and predictably reproduce a near-null; not worth the compute. The de-risk
+correctly gated this BEFORE the multi-day commit. The contribution is the diagnostic arc
+(ADR-029/030/031/032 + #18). De-risk limitations (honest): 16k-scene subset, 4000 steps (loss
+converged by ~step 500), M=6; a full-budget retrain could shift the 2-3% marginally but the
+data-bottleneck trend makes a maneuver-level multimodal policy unlikely from this recipe.
+Artifacts: wta_derisk_train.py, wta_probe.py; results /scratch/.../wta_derisk_probe6k.json,
+wta_derisk_eps01_probe6k.json.
