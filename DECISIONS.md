@@ -638,3 +638,21 @@ all PDM sub-components. NOTE the comfort-in-reactive signal flagged earlier (v1.
 replicate under v1.2 (p=0.20): it was 1 of ~14 tests and specification-dependent -> noise, not a
 result. So no secondary signal survives the moderator correction; the null is clean. Artifacts:
 f4_score.py (v1.2), recombine_f4_v12.py, f4_scores_v12.json, remod_v12_r{0,1}.json.
+
+
+## ADR-036 — Finding-4 "available multimodality" is proxy-dependent; retracted as evidence (2026-06-27)
+WS-D: the ADR-031 available-multimodality estimate rested on a random-untrained-encoder kNN whose
+embedding is degenerate (audit C1: all scenes ~0.97 cosine). Built a defensible alternative
+(available_multimodality_v2.py): match contexts by INTERPRETABLE future-independent descriptors
+(ego speed v0, agent count n_par, g_stop, b_r) restricted to the SAME scenario_type -- no learned
+embedding. Result (N=6000, k=8): available disp median 5.64 m (68% >=2 modes), tightest same-type
+scalar-match pair future distance median 12.4 m -- LARGER than the random encoder's 3.14 m, not
+smaller. Reason: scalar features ignore geometry (two same-speed same-type scenes can be entirely
+different intersections), and the random encoder, though degenerate, at least ingests map/route. So
+the kNN "available multimodality" swings 3-12 m by proxy choice and none is a true matched context.
+DECISION: the kNN approach CANNOT establish per-scene future ambiguity from single-future data;
+ADR-031's "the data holds multimodality the policy discards" is RETRACTED as a proxy artifact. The
+reliable per-scene estimate is the full-scene-conditioned WTA fan (Finding 5 / ADR-032): conditioning
+on the entire scene gives a ~2-5 m fan that does not split into modes -> the per-scene future is
+largely scene-determined. This strengthens (does not weaken) the central diagnostic; it just rests it
+on the trustworthy estimator. Artifacts: available_multimodality_v2.py, available_v2.json.

@@ -43,19 +43,23 @@ multimodality perfectly when the supervision is multimodal. The real-data collap
 single-future-per-scene imitation (nuPlan logs one future per scenario -> the learned conditional is
 correctly ~unimodal), not a model bug.
 
-## Finding 4 — the data holds multimodal supervision the policy discards (ADR-031)
-`available_multimodality.py`: context embedding from a RANDOMLY-INITIALIZED (untrained) SceneEncoder
-(input geometry, no future leakage); k nearest-neighbor context-mates' logged-future endpoint
-dispersion + mode count = the conditional spread the data actually carries.
-- captured (policy) 0.13 m  <<  available (kNN, k=16) median 3.14 m  <<  marginal (random pair) 37 m.
-  The kNN is valid (neighbors ~12x tighter than random); their futures are ~24x more dispersed than
-  the policy emits. 46% of scenes have >=2 future modes.
-- k-sensitivity (honesty): available is monotone in k; conservative floor (k=2) 0.79 m / 12.8% >=2
-  modes, still ~6x the collapsed policy. Genuine conditional multimodality exists at the tightest
-  matching; the k=16 figure is upper-leaning.
-- rises with interaction-criticality: high s_inter 3.55 m / 53% >=2 modes vs low 2.94 m / 43%.
-- concentrated at decision points: stationary-at-traffic-light 4.4 modes (100% >=2), light
-  intersections 3.9, construction 3.2, long-vehicle 3.7; vs low-speed 1.8.
+## Finding 4 — "available multimodality" is proxy-dependent and unreliable (ADR-031, revised by ADR-036)
+We tried to estimate the per-scene future ambiguity the data carries via k-NN over scene context,
+measuring the neighbors' logged-future endpoint dispersion. This estimate is NOT reliable: it swings
+3-12 m with the (arbitrary) choice of context similarity, because none of the proxies is a true
+matched context.
+- random untrained-encoder kNN (available_multimodality.py): median 3.14 m, 46% >=2 modes -- but the
+  embedding is degenerate (all scenes ~0.97 cosine; audit C1), so its neighbors are near-random.
+- interpretable same-type match on v0/n_par/g_stop/b_r (available_multimodality_v2.py): median 5.64 m,
+  68% >=2 modes, tightest-pair future distance median 12.4 m -- but scalar features ignore geometry,
+  so same-type "matches" are not geometrically matched.
+- for reference: marginal (random pairs) ~38 m; captured (policy) 0.13 m.
+Because the estimate is proxy-dependent, the kNN approach CANNOT establish per-scene multimodality
+from single-future data. The reliable per-scene estimate is the FULL-scene-conditioned one: train on
+the entire scene and read the predictive spread -- exactly Finding 5 (WTA), where conditioning on all
+tensors yields a ~2-5 m fan that does NOT split into modes. So ADR-031's "the data holds multimodality
+the policy discards" is RETRACTED as a proxy artifact; the trustworthy evidence (Finding 5) indicates
+the per-scene future is largely scene-determined.
 
 ## Finding 5 — the standard fix (WTA) yields a wider fan, not distinct modes; the future is largely determined (ADR-032)
 De-risk before any multi-day retrain: a winner-take-all multi-hypothesis head (`WTAHead`, M=6),

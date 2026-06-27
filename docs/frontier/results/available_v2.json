@@ -1,0 +1,21 @@
+{
+  "n_scenes": 6000,
+  "k": 8,
+  "eps_m": 3.5,
+  "captured_policy_disp_m": 0.131,
+  "marginal_randompair_disp_m": 38.324,
+  "interpretable_match_available": {
+    "n_evaluated": 6000,
+    "disp_median_m": 5.642,
+    "disp_mean_m": 7.508,
+    "frac_ge2_modes": 0.678,
+    "mean_modes": 2.202
+  },
+  "tightest_match_pair_future_dist_m": {
+    "median": 12.411,
+    "mean": 18.694,
+    "p90": 46.313
+  },
+  "random_encoder_old_disp_m": 3.14,
+  "note": "interpretable same-type match; UPPER bound (coarse scalar match) but no embedding degeneracy"
+}
