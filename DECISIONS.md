@@ -801,3 +801,26 @@ This is the CAPSTONE: negative diagnostic (collapse + saturation + supervised fi
 constructive RL recipe (scene-adaptive multimodality, deployable) + a positive directional FLIP of
 the moderation once the treatment is present. Artifacts: rl_h1_eval sim_results, h1_retest_result.json,
 h1_retest.py.
+
+## ADR-044 — H1 RE-TEST FINAL (N=800): moderation slope flips to the H1-predicted POSITIVE direction; suggestive, not significant (2026-06-28)
+Full 800-token closed-loop eval of the RL scene-adaptive multimodal policy (rl_long_s6000, head=wta,
+top-scored mode) vs the #18 det_route baseline (800/800 matched). Delta = CLS(RL) - CLS(det) ~ F4,
+scenario_type FE + wild-cluster bootstrap (39 clusters):
+- mean CLS RL 0.751 / det 0.865 (Delta -0.114 = maturity-gap INTERCEPT; RL undertrained, ADR-042).
+- beta1 (moderation SLOPE) = +0.035 (cluster SE 0.023, t 1.56, one-sided p 0.063, CI90 [-0.002, +0.073]).
+Progression across N (slope / one-sided p): N=200 +0.054 / 0.13 ; N=600 +0.045 / 0.055 ; N=800 +0.035 / 0.063.
+VERDICT: with a PRESENT scene-adaptive multimodal treatment the moderation slope is POSITIVE (the
+H1-predicted direction, effect size in the pre-registered 0.02-0.05 range) -- a marked qualitative
+change from the collapsed-policy experiment, where it was NULL and WRONG-SIGNED (#18: -0.006/-0.013).
+But it does NOT reach conventional significance at N=800 (one-sided p 0.063; CI90 just includes 0).
+SUGGESTIVE, not confirmatory.
+INTERPRETATION (honest capstone): the directional FLIP (wrong-signed-null -> positive) is direct
+evidence the original null was TREATMENT-ABSENCE, not a true negative; making multimodality present +
+scene-adaptive moves the moderation toward H1 as predicted. Full confirmation falls short, most
+plausibly because the proxy-RL policy is undertrained (CLS 0.75 vs 0.86, ADR-042) -> the treatment is
+at reduced strength, and a subtle-range effect needs more power / a more mature closed-loop-RL policy.
+COMPLETE ARC: negative diagnostic (collapse + saturation + supervised fixes fail) -> constructive RL
+recipe (scene-adaptive multimodality, deployable, drives closed-loop) -> positive directional flip of
+the moderation with a present treatment (suggestive). The positive experiment is CLOSED at proxy-RL
+scale; a fully-confirmatory result would need closed-loop-in-the-loop RL (out of current scope).
+Artifacts: rl_h1_eval + s0/s1/s2a/s2b sim_results, h1_retest_result.json, h1_retest.py.

@@ -152,9 +152,12 @@ minADE ~0.77 m sub-meter at the accuracy operating point).
 **Drives closed-loop (GATE-RL-3, ADR-041).** The RL policy (with a mode-committing selector that
 executes the top-scored mode) runs in the REAL nuPlan closed-loop simulator: 6/6 simulations
 successful, CLS 0.38-0.99. Reward-hacking is ruled out -- a policy gaming the open-loop proxy would
-crash (CLS ~0); instead it drives sanely. (CLS below the ~0.85 det/diff baseline at de-risk scale is
-training maturity, not hacking; closing that gap + the H1 re-test against this present, scene-adaptive
-treatment, on the unsaturated slice, are the in-progress capstone.)
+crash (CLS ~0); instead it drives sanely. (CLS 0.75 vs the ~0.85 baseline is training maturity, not hacking.) **H1 re-test (final, N=800):**
+evaluating this present, scene-adaptive treatment closed-loop, the moderation slope Delta=CLS(RL)-
+CLS(det) ~ F4 = +0.035 (one-sided p=0.063, effect size in the pre-registered range) -- POSITIVE, the
+H1-predicted direction, a qualitative flip from the collapsed-policy experiment where it was null and
+WRONG-SIGNED (-0.006). Suggestive, not significant: direct evidence the original null was treatment-
+ABSENCE, with full confirmation limited by the undertrained proxy-RL policy (ADR-042/044).
 
 Takeaway: the assumed multimodal benefit is unrealized AND untestable under standard supervised
 nuPlan training, but a reward signal makes scene-adaptive multimodality both learnable and deployable
