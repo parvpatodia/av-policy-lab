@@ -1,0 +1,26 @@
+{
+  "n": 120,
+  "per_mode_mean_CLS": {
+    "0": 0.761,
+    "1": 0.743,
+    "2": 0.769,
+    "3": 0.796,
+    "4": 0.789,
+    "5": 0.714
+  },
+  "best_of_modes_mean_CLS": 0.883,
+  "det_baseline_mean_CLS": 0.868,
+  "deployed_top_scored_ref": 0.75,
+  "best_of_modes_minus_det": 0.016,
+  "frac_a_mode_beats_det": 0.442,
+  "moderation_bestofmodes_adv_vs_F4": {
+    "beta1": -0.022653790147956297,
+    "cluster_se": 0.04538182297452064,
+    "t": -0.4991820218565291,
+    "p_wcr_twosided": 0.5749149829965993,
+    "p_wcr_onesided_gt": 0.7035407081416283,
+    "n": 120,
+    "n_clusters": 28
+  },
+  "verdict_hint": "best_of_modes >> 0.75 and -> det 0.86 => SELECTOR is the bottleneck (modes good); ~0.75 => MODES are the ceiling"
+}

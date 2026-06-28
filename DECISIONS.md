@@ -941,3 +941,22 @@ best-of-modes oracle -- execute EACH of the K modes in the sim on a subset, take
 SELECTOR is the tractable fix, AND multimodality has real closed-loop value (a good mode exists, just
 mis-selected). If ~0.75 -> the modes themselves are the ceiling -> only sim-in-the-loop policy RL
 (prohibitive, low H1-payoff per ADR-045/047). Artifacts: cl_corr.py, cl_corr.json.
+
+## ADR-049 — GATE-CL-2: the SELECTOR is the bottleneck, not the modes; best-of-modes oracle BEATS the deterministic baseline (2026-06-28)
+Closed-loop best-of-modes oracle: executed each of the 6 WTA modes in the sim on 120 F4-stratified
+tokens (720 sims, 120/120 successful each), took best-of-K CLS per token. Per-mode mean CLS 0.71-0.80
+(each mode is a reasonable policy); BEST-OF-MODES mean CLS = 0.883 vs det baseline 0.868 vs deployed
+top-scored 0.75.
+DECISIVE: best-of-modes (0.883) >> deployed top-scored (0.75) AND > det baseline (0.868). The modes
+CONTAIN baseline-beating capability; the 0.75->0.883 gap (0.13 CLS) is ENTIRELY the SELECTOR's fault
+(trained on the ~0-corr open-loop proxy, ADR-048). The MODES are good; the SELECTOR is the fixable
+bottleneck.
+CAVEATS (honest): (a) best-of-modes beats det by only +0.016 on average (frac a-mode-beats-det 44%);
+(b) its advantage does NOT grow with F4 (beta1 -0.023, null) -> consistent w/ ADR-046/047:
+multimodality's value is broad+small, NOT interaction-criticality-specific; (c) best-of-modes is an
+ORACLE (post-hoc, uses true CLS) = the CEILING of a perfect selector; a real closed-loop-trained
+selector captures only PART of the 0.75->0.883 gap.
+TRACTABLE OPTION-1 PATH (GATE-CL-3): train a CLOSED-LOOP selector on per-mode CLS labels (modes frozen;
+far cheaper than sim-in-the-loop policy RL), deploy + eval -> measure how much of the 0.75->0.883
+headroom a learnable selector realizes = the genuine tractable route to a baseline-mature multimodal
+policy. Artifacts: clo_oracle.py, clo_oracle.json, sim_results/clo_mode{0..5}.
