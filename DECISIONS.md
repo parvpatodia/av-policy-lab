@@ -824,3 +824,47 @@ recipe (scene-adaptive multimodality, deployable, drives closed-loop) -> positiv
 the moderation with a present treatment (suggestive). The positive experiment is CLOSED at proxy-RL
 scale; a fully-confirmatory result would need closed-loop-in-the-loop RL (out of current scope).
 Artifacts: rl_h1_eval + s0/s1/s2a/s2b sim_results, h1_retest_result.json, h1_retest.py.
+
+## ADR-045 — Why the positive result is bounded: conceptual/metric barriers + an open-loop-proxy tension (brutally-honest diagnosis) (2026-06-28)
+Question (Parv): are the results "not good", and is it a conceptual / implementation / literature-matching
+/ illogical issue? Triage:
+- The NEGATIVE diagnostic (Part I) is correct, clean, and LITERATURE-CONSISTENT (collapse = DIVER
+  arXiv:2507.04049; saturation = the nuPlan-too-easy critique, Dauner CoRL'23). Not "not good."
+- The POSITIVE result (Part II) is suggestive-not-significant (beta1 +0.035, p 0.063) + sub-baseline
+  policy (CLS 0.75 vs 0.86). The "not good" is here. Causes, in order:
+
+(1) CONCEPTUAL / METRIC (dominant, field-confirmed). Multimodality is a property of the predictive
+DISTRIBUTION; closed-loop CLS scores the single EXECUTED trajectory. The car drives ONE path, so
+policy-multimodality moves CLS only when the SELECTOR's chosen mode beats the deterministic policy's
+executed trajectory. nuPlan's own paper: open-loop distance "is not a suitable indicator in a
+multi-modal scenario" -- but executed-CLS is ALSO near-blind to "having modes" unless they change the
+executed choice. Plus: genuine per-scene bimodality is rare (~2-3%, ADR-037); the deterministic mean
+is usually fine on a saturated benchmark; RAPiD (arXiv:2602.07339, 2026) distills diffusion -> a
+DETERMINISTIC policy with competitive nuPlan CLS. So a SMALL H1 effect is conceptually EXPECTED, not a
+failure -- it matches the literature's skepticism.
+
+(2) LOGICAL TENSION (sharpest self-critique). We trained the RL policy on an OPEN-LOOP proxy reward,
+but Part I's thesis (Dauner) is open-loop != closed-loop. So the proxy-RL is bounded by the exact
+misconception this paper studies; the CLS ceiling (proxy reward plateaued while CLS did not follow,
+ADR-042) is the direct symptom. Not broken, but a known trap we partially fell into. The field's fix
+is closed-loop-reward RL (CaRL arXiv:2504.17838; CarPlanner 2502.19908; DiffusionDriveV2 2512.07745) =
+the multi-week step flagged in SPEC-rl-capstone.
+
+(3) IMPLEMENTATION (real, secondary, fixable). Bounded de-risk RL (6k steps, single seed, M=6, proxy
+reward, proxy-trained selector). Fixable with compute/closed-loop RL -- but per (1) that lifts CLS
+toward baseline WITHOUT necessarily enlarging the H1 effect (the conceptual ceiling remains).
+
+ILLOGICAL? No fundamental illogic. The one honest caveat: the H1 operationalization (selected-mode
+policy vs deterministic, executed-CLS) conflates "having modes" with "the selector's choice" and uses
+a metric structurally near-blind to the predictive distribution -- a known limitation, not a bug.
+
+VERDICT: the results are GOOD as science (correct, honest, literature-consistent). They look "not
+good" only against an expectation -- a big clean significant positive -- that the problem structurally
+does NOT offer on nuPlan executed-CLS. The small/suggestive effect IS the finding.
+
+HIGHER-LEVERAGE NEXT MOVE (cheaper + sharper than closed-loop RL): test multimodality's value with a
+metric that CAN see the distribution -- a BEST-OF-MODES SAFETY ORACLE (does ANY of the K modes avoid a
+collision / off-road that the deterministic policy commits, at interaction-critical scenes?). If
+multimodality's benefit shows up there but not in executed-CLS, that PINPOINTS the metric-blindness as
+the barrier (a clean, novel result) -- runnable on existing data (reuse reward_proxy collision/offroute
++ the RL modes), no closed-loop RL. Closed-loop-reward RL remains the orthogonal path to lift CLS.
