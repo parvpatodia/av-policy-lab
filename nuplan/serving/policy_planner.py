@@ -16,6 +16,7 @@ Design rules (each closes an audit finding):
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -225,7 +226,12 @@ class PolicyPlanner(AbstractPlanner):
                 # mode (not the medoid) -- the point of a multimodal policy is to
                 # commit to a chosen maneuver, not average the alternatives.
                 trajs, scores = self._head(memory, goal=goal)
-                traj_scaled = trajs[0, scores[0].argmax()]
+                # GATE-CL-2 oracle: WTA_MODE_INDEX forces execution of a chosen mode
+                # (to measure best-of-modes closed-loop CLS); else the deployed top-scored mode.
+                _mi = os.environ.get("WTA_MODE_INDEX", "")
+                _m = int(_mi) if _mi != "" else int(scores[0].argmax())
+                _m = min(max(_m, 0), trajs.shape[1] - 1)
+                traj_scaled = trajs[0, _m]
             else:
                 gen = torch.Generator(device=self._device).manual_seed(
                     current_input.iteration.index)
