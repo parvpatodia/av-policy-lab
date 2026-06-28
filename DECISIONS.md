@@ -868,3 +868,31 @@ collision / off-road that the deterministic policy commits, at interaction-criti
 multimodality's benefit shows up there but not in executed-CLS, that PINPOINTS the metric-blindness as
 the barrier (a clean, novel result) -- runnable on existing data (reuse reward_proxy collision/offroute
 + the RL modes), no closed-loop RL. Closed-loop-reward RL remains the orthogonal path to lift CLS.
+
+## ADR-046 — Safety-oracle: multimodality has latent (uniform, partly-artifactual) value, but H1's F4-moderation is NULL in the distribution-aware metric too (2026-06-28)
+Best-of-modes safety oracle (safety_oracle.py, N=2000): per scene, min unsafety (collision + off-route
+via the validated reward_proxy) over the RL policy's 6 modes vs the DETERMINISTIC policy's single
+executed trajectory.
+- mean det unsafety 0.431 -> best-mode 0.109 (advantage 0.322); a mode is SAFER than det in 74% of
+  scenes. So multimodality carries latent value that executed-CLS (one trajectory) cannot credit --
+  the metric-blindness (ADR-045) is REAL.
+- BUT the advantage does NOT grow with interaction-criticality: high s_inter 0.329 vs low 0.318;
+  moderation beta1 = -0.031 (cluster SE 0.045, one-sided p 0.76) = NULL / wrong direction.
+HONEST CAVEAT: the 74% / 0.322 magnitude is partly a BEST-OF-K SELECTION ARTIFACT (min over 6 spread
+modes vs 1 trajectory on a noisy metric usually finds a lower one); a fair control would be
+best-of-K-modes vs best-of-K-perturbations-of-det. So the latent-value SIZE is inflated; the robust
+readout is the F4-MODERATION, which is NULL.
+CROSS-METRIC CONCLUSION (the real answer to "are the results good / why"): H1 -- the SPECIFIC claim
+that multimodality's closed-loop benefit GROWS with interaction-criticality -- is NOT robustly
+supported on nuPlan in EITHER metric: executed-CLS N=800 beta1 +0.035 (suggestive, p 0.063) AND the
+distribution-aware safety oracle beta1 -0.031 (null). The executed-CLS directional flip is NOT robust
+across metrics -> treat it as noise, not support. What DOES hold: (a) the original null was
+treatment-ABSENT (collapse, ADR-029); (b) with a present scene-adaptive treatment, H1's
+interaction-criticality moderation STILL does not appear; (c) multimodality has latent safety value
+but it is UNIFORM (not decision-point-specific) and partly a best-of-K artifact.
+HONEST FINAL: not "multimodality is useless" and not "H1 confirmed" -- "H1's interaction-criticality
+moderation is genuinely unsupported even after recovering a present treatment and using a
+distribution-aware metric; multimodality's value, where present, is broad not F4-specific." Consistent
+with Dauner (deterministic competitive) + RAPiD (diffusion->deterministic distillation). This REVISES
+the ADR-043/044 "suggestive positive" down to "not robust across metrics." Artifacts: safety_oracle.py,
+safety_oracle.json.
