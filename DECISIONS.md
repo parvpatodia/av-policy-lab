@@ -896,3 +896,29 @@ distribution-aware metric; multimodality's value, where present, is broad not F4
 with Dauner (deterministic competitive) + RAPiD (diffusion->deterministic distillation). This REVISES
 the ADR-043/044 "suggestive positive" down to "not robust across metrics." Artifacts: safety_oracle.py,
 safety_oracle.json.
+
+## ADR-047 — Fair best-of-K control: the RL multimodality provides ~0 safety value beyond matched-random perturbations of the deterministic policy (2026-06-28)
+Resolves the ADR-046 caveat (the 74%-of-scenes "a mode is safer" was "partly a best-of-K artifact").
+Fair control (safety_oracle.py): RL best-of-K modes vs the deterministic trajectory + K MATCHED-
+DISPERSION random perturbations (per-scene noise calibrated to the RL modes' endpoint std, ramped to
+the endpoint), both reduced by best-of-K. N=2000.
+- det single-traj unsafety 0.431; RL best-of-K 0.109; det best-of-K (matched random) 0.116.
+- UNFAIR advantage (RL bestK vs det 1 traj) = 0.322, 74% of scenes -> ALMOST ENTIRELY a SELECTION
+  ARTIFACT.
+- FAIR advantage (RL bestK vs det matched-random bestK) = +0.0075 (~0); RL learned modes beat
+  matched-random in only 48.7% of scenes (~coin flip). F4-moderation of the FAIR advantage:
+  beta1 -0.061 (negative; one-sided p 0.76, NOT H1).
+VERDICT: the RL policy's LEARNED multimodality provides essentially NO safety value beyond K random
+perturbations of the deterministic trajectory of the same dispersion. The 74%/0.32 "latent value"
+(ADR-046) was the best-of-K selection effect; netting it out, the learned modes are not placed in
+safer regions than random spread (48.7% = coin flip).
+COMPLETE, FINAL, HONEST CONCLUSION (across ALL metrics): even with a present, scene-adaptive multimodal
+policy, there is NO evidence its multimodality yields closed-loop value -- executed-CLS H1 slope +0.035
+(p 0.063) did NOT replicate; the artifact-controlled safety advantage is ~0 / coin-flip -- and NO
+interaction-criticality moderation in any metric. The original null was TREATMENT-ABSENCE; the
+corrected experiment, with a present treatment AND an artifact-controlled metric, shows the multimodal
+benefit is genuinely not there on nuPlan. This SUPERSEDES the ADR-046 "latent value (74%)" framing
+(retracted as a selection artifact). Consistent with Dauner (deterministic competitive) + RAPiD
+(diffusion->deterministic distillation). INTEGRITY NOTE: this fair control was built specifically to
+falsify the positive-leaning interpretation, and it did -- the conclusion is the stronger for it.
+Artifacts: safety_oracle.py (fair control), safety_oracle_fair.json.

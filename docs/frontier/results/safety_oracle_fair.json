@@ -1,0 +1,32 @@
+{
+  "n": 2000,
+  "det_ckpt": "/scratch/patodia.pa/av-policy-lab/runs/f5_2x2_v4/det_route_seed0/epoch_120.pt",
+  "rl_ckpt": "/scratch/patodia.pa/av-policy-lab/runs/wta_derisk/rl_long_s6000.pt",
+  "mean_det_unsafety": 0.4309384231615672,
+  "mean_best_mode_unsafety": 0.10856527340895776,
+  "mean_det_bestK_unsafety": 0.11611035568232353,
+  "UNFAIR_mean_safety_advantage": 0.3223731497526094,
+  "UNFAIR_frac_scenes_a_mode_safer_than_det": 0.7415,
+  "FAIR_mean_advantage_vs_matched_random": 0.007545082273365782,
+  "FAIR_frac_RL_modes_beat_matched_random": 0.487,
+  "FAIR_adv_high_sinter": -0.01370344946075554,
+  "FAIR_adv_low_sinter": 0.02084700864350678,
+  "moderation_UNFAIR_adv_vs_F4": {
+    "beta1": -0.03106567759334731,
+    "cluster_se": 0.044533581932171724,
+    "t": -0.6975786865889851,
+    "p_wcr_twosided": 0.4360872174434887,
+    "p_wcr_onesided_gt": 0.755751150230046,
+    "n": 2000,
+    "n_clusters": 15
+  },
+  "moderation_FAIR_adv_vs_F4": {
+    "beta1": -0.06080477430801484,
+    "cluster_se": 0.018373967243837667,
+    "t": -3.309289360380665,
+    "p_wcr_twosided": 0.44288857771554313,
+    "p_wcr_onesided_gt": 0.7585517103420684,
+    "n": 2000,
+    "n_clusters": 15
+  }
+}

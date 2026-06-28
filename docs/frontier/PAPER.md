@@ -158,9 +158,12 @@ crash (CLS ~0); instead it drives sanely. (CLS 0.75 vs the ~0.85 baseline is tra
 Delta=CLS(RL)-CLS(det)~F4 = +0.035 (N=800, one-sided p=0.063) -- positive (a flip from the collapsed
 policy's wrong-signed -0.006), but only suggestive. Because executed-CLS is structurally blind to the
 predictive distribution, we also tested a DISTRIBUTION-AWARE metric -- a best-of-modes safety oracle
-(does any mode avoid a collision/off-road the deterministic policy commits?). There, multimodality
-shows large LATENT value (a safer mode exists in 74% of scenes), but its F4-moderation is NULL
-(beta1 -0.031) and the magnitude is partly a best-of-K selection artifact. So across BOTH metrics,
+(does any mode avoid a collision/off-road the deterministic policy commits?). There, a best-of-K
+selection effect makes a mode look safer than the deterministic policy in 74% of scenes -- but a
+FAIR control (RL learned modes vs the deterministic trajectory + K matched-dispersion random
+perturbations) nets it out: the fair advantage is ~0 and the learned modes beat matched-random in
+only 48.7% of scenes (a coin flip), with a null/negative F4-moderation. So the apparent latent value
+was the selection artifact, not learned placement. Across ALL metrics,
 H1's specific interaction-criticality MODERATION is not robustly supported (the executed-CLS flip does
 not replicate distribution-aware). Honest conclusion: the original null was treatment-absence
 (collapse), but even after recovering a present scene-adaptive treatment, the multimodal benefit is

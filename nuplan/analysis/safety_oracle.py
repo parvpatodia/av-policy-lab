@@ -79,26 +79,44 @@ def main():
     with torch.no_grad():
         det = unscale_future(dhead(denc(batch), goal=None)).cpu().numpy()        # (N,H,3)
         modes = unscale_future(rhead(renc(batch), goal=None)[0]).cpu().numpy()   # (N,K,H,3)
-    N = det.shape[0]
-    det_un = np.empty(N); best_un = np.empty(N)
+    N, K = det.shape[0], modes.shape[1]
+    H = det.shape[1]
+    ramp = (np.arange(1, H + 1) / H)[:, None]                # linear growth to the endpoint
+    rng = np.random.default_rng(0)
+    det_un = np.empty(N); best_un = np.empty(N); det_bestK = np.empty(N)
     for i in range(N):
         det_un[i] = unsafety(det[i, :, :2], dicts[i], dn)
-        best_un[i] = min(unsafety(modes[i, m, :, :2], dicts[i], dn) for m in range(modes.shape[1]))
-    adv = det_un - best_un                                   # >0: a mode is SAFER than det
+        best_un[i] = min(unsafety(modes[i, m, :, :2], dicts[i], dn) for m in range(K))
+        # FAIR CONTROL: K matched-dispersion random perturbations of the det trajectory.
+        # noise endpoint-std set to the RL modes' per-scene endpoint std -> det gets K equally-
+        # spread tries, netting out the best-of-K + spread-magnitude effects. If RL learned modes
+        # still beat this, their safety value is REAL (placement), not a selection artifact.
+        ep = modes[i, :, -1, :2]                             # (K,2) RL mode endpoints
+        sig = float(ep.std(0).mean()) + 1e-6
+        pert = det[i, :, :2][None] + rng.normal(0, 1, (K, H, 2)) * ramp[None] * sig   # (K,H,2)
+        det_bestK[i] = min(unsafety(pert[m], dicts[i], dn) for m in range(K))
+    adv = det_un - best_un                                   # >0: a mode is SAFER than det (1 traj)
+    fair_adv = det_bestK - best_un                           # >0: RL modes safer than matched random
 
     f4all = json.load(open(a.f4)); f4 = {t: r["f4"] for t, r in f4all.items() if r.get("f4") is not None}
     styp = {t: f4all[t].get("scenario_type", "?") for t in f4all}
     keep = [i for i, t in enumerate(tok) if t in f4]
-    adv_k = adv[keep]; x = np.array([f4[tok[i]] for i in keep]); g = np.array([styp.get(tok[i], "?") for i in keep])
+    adv_k = adv[keep]; fair_k = fair_adv[keep]
+    x = np.array([f4[tok[i]] for i in keep]); g = np.array([styp.get(tok[i], "?") for i in keep])
     wc = wild_cluster_test(x, adv_k, g, B=4999)
+    wc_fair = wild_cluster_test(x, fair_k, g, B=4999)
     hi = x >= 0.5
     res = {"n": int(len(keep)), "det_ckpt": a.det_ckpt, "rl_ckpt": a.rl_ckpt,
            "mean_det_unsafety": float(det_un.mean()), "mean_best_mode_unsafety": float(best_un.mean()),
-           "mean_safety_advantage": float(adv_k.mean()),
-           "frac_scenes_a_mode_safer_than_det": float((adv_k > 1e-6).mean()),
-           "safety_adv_high_sinter": float(adv_k[hi].mean()) if hi.sum() else None,
-           "safety_adv_low_sinter": float(adv_k[~hi].mean()) if (~hi).sum() else None,
-           "moderation_adv_vs_F4": wc}
+           "mean_det_bestK_unsafety": float(det_bestK[keep].mean()),
+           "UNFAIR_mean_safety_advantage": float(adv_k.mean()),
+           "UNFAIR_frac_scenes_a_mode_safer_than_det": float((adv_k > 1e-6).mean()),
+           "FAIR_mean_advantage_vs_matched_random": float(fair_k.mean()),
+           "FAIR_frac_RL_modes_beat_matched_random": float((fair_k > 1e-6).mean()),
+           "FAIR_adv_high_sinter": float(fair_k[hi].mean()) if hi.sum() else None,
+           "FAIR_adv_low_sinter": float(fair_k[~hi].mean()) if (~hi).sum() else None,
+           "moderation_UNFAIR_adv_vs_F4": wc,
+           "moderation_FAIR_adv_vs_F4": wc_fair}
     print(json.dumps(res, indent=2))
     if a.out: Path(a.out).write_text(json.dumps(res, indent=2)); print("wrote", a.out)
 
