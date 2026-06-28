@@ -26,7 +26,9 @@ bootstrap, TOST), the null holds and is *equivalent to zero*, it **survives remo
 and the directional prediction is reversed at its leverage point. The assumed multimodal benefit is
 therefore, on standard nuPlan closed-loop, both **unrealized** and **untestable as set up**. We then show, constructively, that the multimodality CAN be recovered where every
 supervised fix failed: a reward-guided RL recipe (open-loop proxy reward + group-relative advantage)
-produces a SCENE-ADAPTIVE multimodal policy that drives in closed-loop -- validated end-to-end. This is
+produces a SCENE-ADAPTIVE multimodal policy that drives in closed-loop; yet even with this present
+treatment, H1's interaction-criticality moderation is not robustly supported across executed-CLS and a
+distribution-aware safety metric -- the multimodal benefit is broad and small, not decision-point-specific. This is
 a measurement/method result in the lineage of Dauner et al., *Parting with Misconceptions* (CoRL
 2023); the collapse leg is independently confirmed by DIVER (arXiv:2507.04049, 2025).
 
@@ -152,12 +154,18 @@ minADE ~0.77 m sub-meter at the accuracy operating point).
 **Drives closed-loop (GATE-RL-3, ADR-041).** The RL policy (with a mode-committing selector that
 executes the top-scored mode) runs in the REAL nuPlan closed-loop simulator: 6/6 simulations
 successful, CLS 0.38-0.99. Reward-hacking is ruled out -- a policy gaming the open-loop proxy would
-crash (CLS ~0); instead it drives sanely. (CLS 0.75 vs the ~0.85 baseline is training maturity, not hacking.) **H1 re-test (final, N=800):**
-evaluating this present, scene-adaptive treatment closed-loop, the moderation slope Delta=CLS(RL)-
-CLS(det) ~ F4 = +0.035 (one-sided p=0.063, effect size in the pre-registered range) -- POSITIVE, the
-H1-predicted direction, a qualitative flip from the collapsed-policy experiment where it was null and
-WRONG-SIGNED (-0.006). Suggestive, not significant: direct evidence the original null was treatment-
-ABSENCE, with full confirmation limited by the undertrained proxy-RL policy (ADR-042/044).
+crash (CLS ~0); instead it drives sanely. (CLS 0.75 vs the ~0.85 baseline is training maturity, not hacking.) **H1 re-test (final).** With this present, scene-adaptive treatment, the executed-CLS moderation
+Delta=CLS(RL)-CLS(det)~F4 = +0.035 (N=800, one-sided p=0.063) -- positive (a flip from the collapsed
+policy's wrong-signed -0.006), but only suggestive. Because executed-CLS is structurally blind to the
+predictive distribution, we also tested a DISTRIBUTION-AWARE metric -- a best-of-modes safety oracle
+(does any mode avoid a collision/off-road the deterministic policy commits?). There, multimodality
+shows large LATENT value (a safer mode exists in 74% of scenes), but its F4-moderation is NULL
+(beta1 -0.031) and the magnitude is partly a best-of-K selection artifact. So across BOTH metrics,
+H1's specific interaction-criticality MODERATION is not robustly supported (the executed-CLS flip does
+not replicate distribution-aware). Honest conclusion: the original null was treatment-absence
+(collapse), but even after recovering a present scene-adaptive treatment, the multimodal benefit is
+broad and small, NOT decision-point-specific -- consistent with Dauner (deterministic competitive) and
+RAPiD (diffusion->deterministic distillation). (ADR-042/044/045/046.)
 
 Takeaway: the assumed multimodal benefit is unrealized AND untestable under standard supervised
 nuPlan training, but a reward signal makes scene-adaptive multimodality both learnable and deployable
