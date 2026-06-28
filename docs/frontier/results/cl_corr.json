@@ -1,0 +1,8 @@
+{
+  "n": 301,
+  "pearson_proxy_vs_CLS": 0.108,
+  "spearman_proxy_vs_CLS": 0.049,
+  "proxy_mean": -1.734,
+  "cls_mean": 0.78,
+  "interpretation": "high (|r|>~0.5) -> open-loop proxy predicts closed-loop CLS, a better proxy is viable; low -> open-loop!=closed-loop gap fundamental, sim-in-the-loop reward required"
+}

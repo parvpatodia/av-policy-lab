@@ -922,3 +922,22 @@ benefit is genuinely not there on nuPlan. This SUPERSEDES the ADR-046 "latent va
 (diffusion->deterministic distillation). INTEGRITY NOTE: this fair control was built specifically to
 falsify the positive-leaning interpretation, and it did -- the conclusion is the stronger for it.
 Artifacts: safety_oracle.py (fair control), safety_oracle_fair.json.
+
+## ADR-048 — GATE-CL-1: the open-loop proxy reward is ~orthogonal to closed-loop CLS (r=0.11); open-loop reward engineering is futile (2026-06-28)
+Option-1 (closed-loop-reward RL) de-risk. Correlated the validated open-loop proxy reward
+(reward_proxy, on the RL policy's executed TOP-SCORED mode) vs ACTUAL closed-loop CLS over n=301
+rl_h1 tokens: Pearson 0.108, Spearman 0.049 -- NEAR ZERO.
+VERDICT: the open-loop proxy reward does NOT predict the closed-loop outcome. Therefore (a) improving
+the open-loop proxy is FUTILE -- a "better" open-loop reward faces the same ~0 transfer; (b) the RL CLS
+ceiling (0.75, ADR-042) was a fundamental REWARD-SIGNAL gap, not a training-budget issue; (c) a
+closed-loop-good policy REQUIRES sim-in-the-loop reward (real CLS in the loop) -- the heavy path.
+SHARP, CITABLE FINDING: open-loop reward FIDELITY (ranking single trajectories: GATE-RL-1 expert beats
+perturbations 87-95%) does NOT imply closed-loop reward fidelity (r=0.11 with CLS). The Dauner
+open-loop != closed-loop thesis quantified for REWARD signals -- explains why proxy-RL ceilinged and
+why the H1 re-test was inconclusive.
+NEXT (GATE-CL-2, the worth-it test): is the SELECTOR the bottleneck or the MODES? Closed-loop
+best-of-modes oracle -- execute EACH of the K modes in the sim on a subset, take best-of-K CLS. If
+>> top-scored 0.75 and approaches/beats baseline 0.86 -> the modes are good, a closed-loop-trained
+SELECTOR is the tractable fix, AND multimodality has real closed-loop value (a good mode exists, just
+mis-selected). If ~0.75 -> the modes themselves are the ceiling -> only sim-in-the-loop policy RL
+(prohibitive, low H1-payoff per ADR-045/047). Artifacts: cl_corr.py, cl_corr.json.
