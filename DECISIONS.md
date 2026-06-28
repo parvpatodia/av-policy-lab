@@ -761,3 +761,23 @@ NEXT: close the CLS gap -- longer RL (more steps/data) toward baseline maturity.
 proceed to the full matched retrain + unsaturated eval + H1 re-test (negative+positive capstone); if it
 plateaus below baseline, that bounds open-loop-proxy RL (a finding). Artifacts: sim_results/rl_smoke,
 run_cells (--head wta), serving/policy_planner.py (wta path).
+
+## ADR-042 — Longer RL: open-loop-proxy RL CLS ceilings ~0.71 (below baseline); H1 re-test is feasible via the moderation slope (2026-06-27)
+Longer RL (rl_long_s6000: 6000 steps, 8000 scenes, warm-start rl_tuned) closed-loop eval (20
+scenarios): mean CLS 0.707, median 0.750, final 0.712, 20/20 successful. vs 1500-step 0.65; det/diff
+baseline ~0.85. More training improved CLS (0.65->0.71) but PLATEAUED below baseline; the training
+proxy reward also plateaued (meanR ~-0.5 across 1500->6000 steps).
+FINDING: open-loop-proxy RL yields a deployable, scene-adaptive multimodal policy that drives
+(CLS 0.71) but is NOT baseline-competitive -- the open-loop proxy is an imperfect closed-loop surrogate
+(reward-CLS gap), so CLS ceilings ~0.71 without closed-loop-in-the-loop reward (the expensive
+DIVER-full path). This BOUNDS what open-loop-proxy RL achieves -- a clean, citable boundary.
+H1 RE-TEST feasibility: a matched-maturity multimodal-vs-unimodal level comparison isn't achievable
+via proxy-RL (0.71 vs 0.85). BUT the MODERATION is robust to a constant level offset: Delta =
+CLS(RL) - CLS(det) ~ F4 tests whether the gap's SLOPE varies with interaction-criticality; the
+intercept absorbs the maturity gap. So an honest H1 re-test against a PRESENT, scene-adaptive treatment
+IS feasible.
+NEXT: closed-loop eval rl_long on a manifest subset spanning F4 bands (matched to the #18 det_route
+baseline), regress Delta(RL-det) ~ F4 (analyze_moderation_v2 inference). Either result publishable:
+positive slope = multimodality helps relatively more at interaction-critical scenes (H1 supported with
+a present treatment); null = even present scene-adaptive multimodality does not F4-moderate the
+closed-loop gap (the strongest form of the negative result). Artifacts: rl_long_eval sim_results.
