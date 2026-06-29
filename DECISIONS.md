@@ -960,3 +960,73 @@ TRACTABLE OPTION-1 PATH (GATE-CL-3): train a CLOSED-LOOP selector on per-mode CL
 far cheaper than sim-in-the-loop policy RL), deploy + eval -> measure how much of the 0.75->0.883
 headroom a learnable selector realizes = the genuine tractable route to a baseline-mature multimodal
 policy. Artifacts: clo_oracle.py, clo_oracle.json, sim_results/clo_mode{0..5}.
+
+
+## ADR-050: Pivot to standard-split, realism-axis evaluation (SMART reactive agents)
+Date: 2026-06-29. Status: ACTIVE.
+
+Context. Hagedorn et al., "When Planners Meet Reality: How Learned, Reactive Traffic
+Agents Shift nuPlan Benchmarks" (arXiv:2510.14677; Steffen Hagedorn, Bosch / U. Lubeck)
+show nuPlan IDM agents OVERESTIMATE planning performance and shift the deterioration
+pattern: imitation-learned planners degrade on simple scenes, rule-based planners degrade
+on harder interaction scenes, once IDM is replaced by the learned SMART reactive-agent
+model. Steffen's email confirms their SMART checkpoint was selected purely on next-token
+classification accuracy (an open-loop proxy), with no closed-loop metric in selection,
+and invites closed-loop results with newer planners. This matches our own GATE-CL-1
+finding (open-loop proxy ~ orthogonal to closed-loop CLS, r=0.11, ADR-048).
+Measured fact (this fire): all prior eval (H1, selector, CLS) ran under IDM on a custom
+800-token set (eval_tokens/manifest.json). Overlap with canonical Val14 (1118 tokens) and
+Test14-hard (272 tokens) is EXACTLY ZERO. Prior numbers are therefore not comparable to
+the literature, and the f0_v3 cache (722 shards, 17 task dirs, no token index) does not
+contain the canonical tokens.
+
+Decision. Re-scope the capstone to a two-phase, realism-axis study on standard splits.
+- Phase 1 (no dependency on Steffen): re-baseline the ego zoo (det, multimodal/WTA,
+  closed-loop selector, PDM-Closed) under IDM on canonical Val14 + Test14-hard + interPlan,
+  with the pre-registered stratified inference (scenario fixed effects, wild-cluster
+  bootstrap, TOST) and interaction-criticality (F4) stratification. Requires feature
+  regeneration for canonical tokens (cache is disjoint). Standalone, literature-comparable.
+- Phase 2 (gated on Steffen's nuPlan tokenization config + motion-token codebook): swap
+  IDM -> SMART reactive agents and re-run the same zoo. Headline questions: does sim
+  realism change the multimodality / scene-adaptivity conclusion, and does CLS-under-IDM
+  predict CLS-under-SMART (planner-ranking shift)?
+
+Consequences. Prior IDM / custom-subset numbers (det 0.868, deployed selector 0.75,
+oracle best-of-modes 0.883) are retained only as INTERNAL references, not headline
+results. The H1 null is reframed as CONDITIONAL on sim realism (IDM under-reacts and
+masks interaction), to be retested under SMART. The nuPlan<->SMART adapter is built in
+tokenizer-independent parts now (harness hooks, agent read/write, validation gate);
+tokenization is gated on Steffen. First concrete step: f0_v3 token index (job f0v3idx)
+-> true canonical coverage -> feature-regeneration scope for missing tokens.
+
+
+## ADR-051: GATE-CL-3 deployed-selector result + cluster env map (IDM regime)
+Date: 2026-06-29. Status: internal reference (superseded as headline by ADR-050 pivot).
+
+Closed-loop selector (score head retrained on per-mode closed-loop CLS, encoder/queries/
+mode_emb/trunk frozen), deployed argmax on the held-out 120 IDM scenes:
+  deployed_selector_CLS = 0.771 (n=120)
+  refs: prev_deployed (open-loop / next-token-style selection) 0.75 | det baseline 0.868 |
+        oracle best-of-modes 0.883.
+Reading: the learnable closed-loop selector lifts deployed CLS by only +0.021 (0.75 ->
+0.771), i.e. it captures ~16% of the 0.133 oracle headroom and stays ~0.10 below the
+deterministic baseline. So "the selector is the bottleneck" (ADR-049, an oracle/privileged
+result) is only partly actionable: a realistic non-privileged learned selector recovers
+little of the oracle advantage. The modes-good (oracle 0.883) vs deployable (0.771) gap is
+a selection-LEARNABILITY gap, and it is large. Consistent with ADR-045: under IDM the
+multimodal policy stays sub-baseline even with closed-loop-aware selection. Headline work
+is now the standard-split + SMART realism pivot (ADR-050); this number is an IDM-regime
+internal reference only.
+
+Cluster env map (to stop env-guessing; cost three failed job attempts this session):
+  - TRAINING / torch.load: /home/patodia.pa/.conda/envs/pytorch_env/bin/python
+    (torch 2.4.1+cu121; NO pyarrow).
+  - ANALYSIS / nuPlan sim / aggregator parquet: /home/patodia.pa/.conda/envs/nuplan/bin/python
+    (pyarrow + nuplan-devkit).
+  - ALWAYS export PYTHONNOUSERSITE=1 first; a broken ~/.local torch shadows imports otherwise.
+  - There is NO conda env named "fell". The vitcd venv (/scratch/patodia.pa/venvs/vitcd)
+    belongs to vit-from-scratch, not av-policy-lab. Call interpreters by absolute path; do
+    not rely on `module load` + `conda activate` in non-interactive ssh.
+
+### ADR-050 coverage result (2026-06-29)
+f0_v3 cache = 5568 unique tokens. Canonical-split coverage: Val14 5/1118, Test14-hard 2/272. => feature regeneration required for ~1383 canonical tokens before any Phase-1 standard-split eval.
