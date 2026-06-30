@@ -1115,3 +1115,37 @@ Launched: nuplan/slurm/val14_zoo_array.sbatch (job 7987964, array 0-63%16) =
 Honest scope: the checkpoints were trained on the mini split; eval-on-Val14 is a valid benchmark
   eval, but absolute CLS reflects a mini-trained policy. The multimodal-vs-deterministic and (Phase 2)
   IDM-vs-SMART RELATIVE comparisons are the research signal, not the absolute numbers.
+
+
+## ADR-055: Phase-1 Val14 standard-split CLS (under IDM) -- multimodality underperforms deterministic
+Date: 2026-06-30. Status: result (CLS headline complete; F4/s_inter moderation pending job 8004148).
+
+Setup. Ego zoo evaluated closed-loop on the canonical Val14 split (1118 scenarios) under IDM
+reactive agents (run_cells --db-dir <val> --reactive 1), with the CLS-selected det checkpoint
+and the wta_derisk rl_long / rl_clsel checkpoints (all mini-trained; ADR-054 scope caveat).
+Features built live during sim (no cache; ADR-053). 64-task array, all 16/16 shards per config,
+0 unreadable shards.
+
+Per-config Val14 CLS (n=1118 each):
+  PDM-Closed (rule-based)            0.9688
+  det (deterministic IL)            0.8049
+  sel (closed-loop selector on WTA) 0.7410
+  wta (multimodal / WTA)            0.7121
+
+Reading (brutally honest):
+- Among the LEARNED policies, deterministic is best. MULTIMODALITY UNDERPERFORMS: WTA 0.712 is
+  -0.093 below det 0.805 on the standard split under IDM. This confirms the multimodality-collapse
+  / mean-regression finding (mini: ADR-029/045) on the full Val14 benchmark, not just the dev split.
+- The closed-loop selector recovers part of the WTA deficit (0.712 -> 0.741, +0.029) but does NOT
+  reach deterministic. The selection-learnability gap (ADR-051; mini 0.75->0.771) reproduces on the
+  standard split (val 0.712->0.741).
+- PDM-Closed (rule-based) dominates all learned policies (0.969), as expected -- the learned policies
+  are mini-trained, so ABSOLUTE CLS is not the headline; the RELATIVE result is.
+- The relative conclusion (multimodality net-negative vs deterministic; selector partial recovery)
+  is robust to the move from the dev split to the standard Val14 benchmark.
+
+Pending. Per-token interaction-criticality (s_inter, job 8004148) -> the H1 retest via
+analyze_val14.py: does the WTA-det gap vary with interaction-criticality, with scenario_type fixed
+effects + wild-cluster bootstrap + TOST? Phase 2 (SMART reactive agents) then tests whether this
+conclusion changes under realistic agents (the realism axis), and whether CLS-under-IDM predicts
+CLS-under-SMART.
