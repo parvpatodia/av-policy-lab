@@ -1088,3 +1088,30 @@ future lift (train_* zips are ~40-175 GB each).
 Next. Once unzip completes: run_cells --db-dir <val> --tokens-file val14.json / test14hard.json
 across the zoo (det, multimodal/WTA, selector, PDM-Closed) under IDM -> CLS per token -> the
 pre-registered stratified inference + F4 stratification = the Phase-1 standard-split result.
+
+
+## ADR-054: Val14 = Phase-1 eval set; Test14-hard is in the test split; Val14 zoo eval launched
+Date: 2026-06-29. Status: ACTIVE.
+
+Split membership (verified via the nuPlan builder + ScenarioFilter scenario_tokens on the val DBs):
+  Val14 1118/1118 present in the val split; Test14-hard 0/272 present. Test14-hard tokens live in
+  the held-out TEST split, not val (planTF test14-hard.yaml uses log_names: null). So Val14 is the
+  Phase-1 primary benchmark (also what Hagedorn reports); Test14-hard is deferred pending the 96GB
+  test.zip, once that split membership is confirmed. interPlan (30) also later.
+
+Val data: 1381 val log DBs at /scratch/patodia.pa/nuplan/val_stage/data/cache/val (from the 90GB
+  nuplan-v1.1_val.zip pulled via the public S3 bucket, job 7986967). No feature cache needed: the
+  eval builds features live (ADR-053).
+
+Pipeline fixes (verified): run_cells --db-dir targets the val DBs; PDM-Closed requires
+  PYTHONPATH += /home/patodia.pa/tuplan_garage for the PDMClosedPlanner import. Val scenario
+  extraction verified (a proof built 20 Val14 scenarios); det + pdm proofs run clean.
+
+Launched: nuplan/slurm/val14_zoo_array.sbatch (job 7987964, array 0-63%16) =
+  {PDM-Closed, det/route, WTA/route, closed-loop-selector/route} x 16 shards of the 1118 Val14
+  tokens, under IDM (reactive=1), resume-safe. -> per-config Val14 CLS, then the pre-registered
+  stratified inference (scenario fixed effects, wild-cluster bootstrap, TOST) + F4 stratification.
+
+Honest scope: the checkpoints were trained on the mini split; eval-on-Val14 is a valid benchmark
+  eval, but absolute CLS reflects a mini-trained policy. The multimodal-vs-deterministic and (Phase 2)
+  IDM-vs-SMART RELATIVE comparisons are the research signal, not the absolute numbers.
