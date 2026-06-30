@@ -1030,3 +1030,29 @@ Cluster env map (to stop env-guessing; cost three failed job attempts this sessi
 
 ### ADR-050 coverage result (2026-06-29)
 f0_v3 cache = 5568 unique tokens. Canonical-split coverage: Val14 5/1118, Test14-hard 2/272. => feature regeneration required for ~1383 canonical tokens before any Phase-1 standard-split eval.
+
+
+## ADR-052: Data reality (mini-only) + token-targeted extraction tooling
+Date: 2026-06-29. Status: ACTIVE (decision made with Parv: acquire val data).
+
+Finding (verified). Only the nuPlan `mini` split (64 log DBs, 14GB) is staged at
+/scratch/patodia.pa/nuplan/data/cache/mini; no val/trainval/train/test anywhere on
+scratch or home. The ENTIRE project to date (H1, the closed-loop selector, all CLS
+numbers) ran on `mini`, a dev subset sampled by scenario type (num-scenarios-per-type),
+NOT a benchmark split. Canonical Val14 (1118 tokens) and Test14-hard (272 tokens) come
+from the nuPlan `val` log split, which is absent. That is the true cause of the ~0 cache
+coverage (ADR-050). So standard-split, Steffen-comparable evaluation REQUIRES downloading
+the nuPlan val logs (credentialed; Parv's action). Decision with Parv: acquire the val data.
+
+Tooling added (this commit). scene_features.py now accepts --tokens-file (a JSON
+{"tokens": [...]}) and threads it into ScenarioFilter(scenario_tokens=...), so extraction
+targets ONLY the canonical tokens instead of walking all of val (far less compute).
+Verified on mini: --tokens-file with one token yields exactly "Extracting 1 scenarios"
+(token selection correct). The shard-write path is unchanged from the one that built
+f0_v3 (5568 tokens). Canonical token-files staged: eval_tokens/{val14, test14hard,
+canonical_val14_test14hard}.json (1118 / 272 / 1390).
+
+Next. Parv downloads the nuPlan val logs -> token-targeted array extraction over val
+(--tokens-file canonical_val14_test14hard.json) -> Phase-1 standard-split IDM re-baseline
+of the ego zoo with the pre-registered stratified inference; then the SMART realism axis
+(Phase 2) once Steffen provides the nuPlan tokenizer/codebook.

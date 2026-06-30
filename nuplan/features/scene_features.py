@@ -1367,6 +1367,7 @@ def _build_mini_scenarios(
     log_names: Optional[List[str]] = None,
     num_scenarios_per_type: Optional[int] = None,
     scenario_types: Optional[List[str]] = None,
+    scenario_tokens: Optional[List[str]] = None,
 ) -> List["AbstractScenario"]:
     """Construct nuPlan scenarios from a data root (used by --smoke on MINI and the full run).
 
@@ -1398,7 +1399,7 @@ def _build_mini_scenarios(
     )
     scenario_filter = ScenarioFilter(
         scenario_types=scenario_types,
-        scenario_tokens=None,
+        scenario_tokens=scenario_tokens,
         # WHY log_names: ScenarioFilter already supports per-log filtering.
         # Passing a list here restricts the builder to those specific DB files,
         # which is how the SLURM array path assigns disjoint work to each task.
@@ -1482,6 +1483,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--stride", type=int, default=1, help="iteration stride within a scenario")
     parser.add_argument("--limit", type=int, default=None, help="full run: cap total scenarios")
     parser.add_argument("--num-scenarios-per-type", type=int, default=None, help="balanced sampling: max scenarios per nuPlan scenario type")
+    parser.add_argument("--tokens-file", type=str, default=None, help="JSON file with a tokens list: extract ONLY these scenario tokens, e.g. canonical Val14/Test14-hard.")
     # ── SLURM array parallelisation ─────────────────────────────────────────
     # WHY: the nuPlan map-query bottleneck makes single-job extraction take
     # ~90 h for mini on one CPU.  Splitting across N SLURM array tasks (one
@@ -1580,6 +1582,12 @@ def main(argv: Optional[List[str]] = None) -> None:
     if args.perturb_prob is not None:
         feat_cfg = dataclasses.replace(feat_cfg, perturb_prob=args.perturb_prob)
     extractor = SceneFeatureExtractor(feat_cfg)
+    _tokens = None
+    if args.tokens_file:
+        import json as _json
+        with open(args.tokens_file) as _tf:
+            _tokens = _json.load(_tf)["tokens"]
+        logger.info("token-targeted extraction: %d tokens from %s", len(_tokens), args.tokens_file)
     scenarios = _build_mini_scenarios(
         args.data_root,
         args.map_root,
@@ -1587,6 +1595,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         log_names=log_names,
         num_scenarios_per_type=args.num_scenarios_per_type,
         scenario_types=(args.scenario_types.split(",") if args.scenario_types else None),
+        scenario_tokens=_tokens,
     )
     if not scenarios:
         logger.warning("No scenarios found for task %s — exiting cleanly.", args.array_task_id)
