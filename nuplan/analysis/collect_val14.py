@@ -1,6 +1,6 @@
-"""Collect per-config Val14 CLS across the 16 shards of the val14_zoo array.
-Robust: skips unreadable/partial shard aggregators (prints a warning) so one bad
-parquet cannot block the whole result. Reports n + mean CLS per config."""
+"""Collect per-config CLS across a zoo eval array's shards. Usage:
+  collect_val14.py [split]      (split default 'val14'; e.g. 'test14hard')
+Reads sim_results/eval/<split>_zoo_r1/*_shard*. Robust to unreadable shard aggregators."""
 import sys, glob, os
 import numpy as np
 sys.path.insert(0, "/home/patodia.pa/av-policy-lab")
@@ -8,10 +8,9 @@ sys.path.insert(0, "/home/patodia.pa/av-policy-lab/nuplan")
 sys.path.insert(0, "/home/patodia.pa/av-policy-lab/nuplan/analysis")
 from analyze_moderation_v2 import latest_aggregator, read_cell_metric
 
-BASE = "/scratch/patodia.pa/av-policy-lab/sim_results/eval/val14_zoo_r1"
-configs = {}
-shards_ok = {}
-shards_bad = {}
+split = sys.argv[1] if len(sys.argv) > 1 else "val14"
+BASE = f"/scratch/patodia.pa/av-policy-lab/sim_results/eval/{split}_zoo_r1"
+configs = {}; shards_ok = {}; shards_bad = {}
 for d in sorted(glob.glob(BASE + "/*_shard*")):
     name = os.path.basename(d).rsplit("_shard", 1)[0]
     a = latest_aggregator(d)
@@ -27,7 +26,8 @@ for d in sorted(glob.glob(BASE + "/*_shard*")):
     configs.setdefault(name, {}).update({t: float(v) for t, v in dd.items()})
     shards_ok[name] = shards_ok.get(name, 0) + 1
 
+print(f"=== {split} per-config CLS ===")
 print("config            shards_ok  n_tokens  CLS")
 for name in sorted(configs):
     v = list(configs[name].values())
-    print(f"{name:16s}  {shards_ok.get(name,0):2d}/16     {len(v):5d}   {np.mean(v):.4f}  (bad_shards={shards_bad.get(name,0)})")
+    print(f"{name:16s}  {shards_ok.get(name,0):2d}        {len(v):5d}   {np.mean(v):.4f}  (bad={shards_bad.get(name,0)})")

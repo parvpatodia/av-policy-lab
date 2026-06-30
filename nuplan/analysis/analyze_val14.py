@@ -1,8 +1,9 @@
-"""Phase-1 Val14 analysis (ADR-050/054). Per-config CLS on Val14 under IDM, plus the
-multimodality (WTA-det) and selector (sel-det) contrasts regressed on interaction-criticality
-(s_inter) with scenario_type FIXED EFFECTS + wild-cluster bootstrap (clustered by scenario_type)
-and TOST equivalence. This is the H1 interaction-criticality retest on the standard split.
-Runs partial: prints whatever data has landed so far."""
+"""Phase-1 zoo analysis (ADR-050/054/056). Per-config CLS + multimodality (WTA-det) and
+selector contrasts regressed on interaction-criticality (s_inter) with scenario_type FIXED
+EFFECTS + wild-cluster bootstrap + TOST equivalence. Usage:
+  analyze_val14.py [split] [sinter_file]
+  split default 'val14'; sinter_file default 'val_sinter.json' for val14 else '<split>_sinter.json'.
+Robust: prints whatever data has landed; skips a contrast if data missing."""
 import sys, glob, os, json
 import numpy as np
 sys.path.insert(0, "/home/patodia.pa/av-policy-lab")
@@ -11,7 +12,9 @@ sys.path.insert(0, "/home/patodia.pa/av-policy-lab/nuplan/analysis")
 from analyze_moderation_v2 import latest_aggregator, read_cell_metric, wild_cluster_test, tost_equivalence
 
 SC = "/scratch/patodia.pa/av-policy-lab"
-BASE = f"{SC}/sim_results/eval/val14_zoo_r1"
+split = sys.argv[1] if len(sys.argv) > 1 else "val14"
+sinter_file = sys.argv[2] if len(sys.argv) > 2 else ("val_sinter.json" if split == "val14" else f"{split}_sinter.json")
+BASE = f"{SC}/sim_results/eval/{split}_zoo_r1"
 CONFIGS = ["pdm", "det_route", "wta_route", "sel_route"]
 COL = "score"
 
@@ -21,28 +24,26 @@ def collect(config):
         a = latest_aggregator(d)
         if not a:
             continue
-        v, t = read_cell_metric(a, COL)
+        try:
+            v, t = read_cell_metric(a, COL)
+        except Exception as e:
+            print(f"  WARN skip {os.path.basename(d)}: {e}"); continue
         cls.update(v); typ.update(t)
     return cls, typ
 
 data, types = {}, {}
-print("=== per-config Val14 CLS (under IDM) ===")
+print(f"=== {split} per-config CLS (under IDM) ===")
 for c in CONFIGS:
     cls, typ = collect(c)
     data[c] = cls; types.update(typ)
-    if cls:
-        vv = np.array(list(cls.values()))
-        print(f"{c:10s} n={len(cls):4d} CLS={vv.mean():.4f}")
-    else:
-        print(f"{c:10s} n=0 (no aggregators yet)")
+    print(f"{c:10s} n={len(cls):4d} CLS={np.mean(list(cls.values())):.4f}" if cls else f"{c:10s} n=0")
 
 sinter = {}
-sp = f"{SC}/eval_tokens/val_sinter.json"
+sp = f"{SC}/eval_tokens/{sinter_file}"
 if os.path.exists(sp):
-    sinter = json.load(open(sp))
-    print(f"s_inter tokens: {len(sinter)}")
+    sinter = json.load(open(sp)); print(f"s_inter ({sinter_file}) tokens: {len(sinter)}")
 else:
-    print("val_sinter.json not present yet -- stratification skipped")
+    print(f"{sinter_file} not present -- stratification skipped")
 
 def contrast(a, b, name):
     if not (data.get(a) and data.get(b) and sinter):
