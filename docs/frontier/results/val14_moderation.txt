@@ -1,0 +1,16 @@
+=== per-config Val14 CLS (under IDM) ===
+pdm        n=1118 CLS=0.9688
+det_route  n=1118 CLS=0.8049
+wta_route  n=1118 CLS=0.7121
+sel_route  n=1118 CLS=0.7410
+s_inter tokens: 1118
+=== contrasts regressed on interaction-criticality (s_inter) ===
+[MULTIMODALITY (WTA-det)] n=1118 mean_delta=-0.0928 (CLS_wta_route-CLS_det_route)
+   slope(delta~s_inter): beta1=+0.0168 se=0.0135 t=+1.25 p2=0.244 clusters=33
+   TOST(|slope|<0.05): p=0.007 ci90=[-0.005382843722516614, 0.038893708791253305] equivalent=True
+[SELECTOR (sel-det)] n=1118 mean_delta=-0.0639 (CLS_sel_route-CLS_det_route)
+   slope(delta~s_inter): beta1=+0.0014 se=0.0170 t=+0.08 p2=0.941 clusters=33
+   TOST(|slope|<0.05): p=0.002 ci90=[-0.026657478376965464, 0.029407895339327576] equivalent=True
+[SELECTOR vs WTA (sel-wta)] n=1118 mean_delta=+0.0289 (CLS_sel_route-CLS_wta_route)
+   slope(delta~s_inter): beta1=-0.0154 se=0.0090 t=-1.71 p2=0.109 clusters=33
+   TOST(|slope|<0.05): p=0.000 ci90=[-0.030158968429357905, -0.0006014796770167138] equivalent=True

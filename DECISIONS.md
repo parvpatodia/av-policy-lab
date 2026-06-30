@@ -1149,3 +1149,37 @@ analyze_val14.py: does the WTA-det gap vary with interaction-criticality, with s
 effects + wild-cluster bootstrap + TOST? Phase 2 (SMART reactive agents) then tests whether this
 conclusion changes under realistic agents (the realism axis), and whether CLS-under-IDM predicts
 CLS-under-SMART.
+
+
+## ADR-056: Phase-1 H1 retest on Val14 under IDM -- the NULL replicates (TOST equivalence)
+Date: 2026-06-30. Status: result. Phase-1 IDM arm COMPLETE.
+
+Pre-registered inference: CLS difference regressed on per-token interaction-criticality s_inter,
+with scenario_type FIXED EFFECTS, wild-cluster bootstrap (B=9999, clustered by scenario_type, 33
+clusters), and TOST equivalence (margin 0.05), on Val14 (n=1118). Moderator s_inter from
+f4_score (peak over scene samples); distribution skewed high (mean 0.67, p50 0.97, p90 1.0).
+
+Contrasts:
+  MULTIMODALITY (WTA - det): mean_delta -0.0928; slope beta1 +0.0168 (se .0135, t 1.25, p2 .244);
+    TOST equivalent=True, CI90 [-0.005, +0.039].
+  SELECTOR (sel - det):      mean_delta -0.0639; slope beta1 +0.0014 (p2 .941); TOST equivalent.
+  SELECTOR vs WTA (sel - wta): mean_delta +0.0289; slope beta1 -0.0154 (t -1.71, p2 .109); TOST equiv.
+
+Reading (brutally honest):
+- The H1 NULL REPLICATES on the standard Val14 split under IDM. The multimodality deficit (WTA is
+  -0.093 below det) does NOT vary with interaction-criticality: slope p=.244, and TOST establishes
+  EQUIVALENCE within +/-0.05. Multimodality underperforms BROADLY, not specifically in
+  interaction-critical scenes. This is a strong null (equivalence, n=1118), consistent with the
+  mini-split H1 (ADR-029/045); it is NOT revived by CLS engineering.
+- The closed-loop selector improves on WTA (+0.029) but does not reach deterministic (-0.064), and
+  its advantage shows no s_inter moderation either.
+
+Caveat: s_inter is skewed high (the over-fire tendency, tasks #4/#8), limiting slope power in the
+high-interaction region; the low tail provides identifying variation and TOST equivalence holds, but
+a less-saturated moderator would strengthen the test. A single-representative-sample s_inter (faster,
+less saturated) is the planned refinement if the moderation is revisited.
+
+Phase-1 status: IDM arm COMPLETE -- CLS headline (ADR-055) + this H1-retest moderation. The remaining
+open question is the REALISM AXIS (Phase 2): does the null hold under SMART learned reactive agents
+(the principled reason it might change, per Hagedorn arXiv:2510.14677), and does CLS-under-IDM predict
+CLS-under-SMART? Phase 2 is gated on Steffen Hagedorn providing the nuPlan SMART tokenizer/codebook.
