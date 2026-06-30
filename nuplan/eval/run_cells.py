@@ -62,7 +62,7 @@ def build_cfg(args, exp_name: str):
         f"hydra.searchpath=[{paths.common_dir}, {paths.experiment_dir}, file://{REPO_CONFIG_DIR}, file://{TUPLAN_CONFIG_DIR}]",
         "output_dir=${group}/${experiment}",
         "scenario_builder=nuplan_mini",
-        f"scenario_builder.db_files={DB_DIR}",
+        f"scenario_builder.db_files={args.db_dir}",
         "scenario_filter=all_scenarios",
     ]
     if args.planner == "policy":
@@ -101,6 +101,7 @@ def main():
     ap.add_argument("--goal", choices=("route", "precise"), default=None)
     ap.add_argument("--ckpt", default=None)
     ap.add_argument("--tokens-file", default=None)
+    ap.add_argument("--db-dir", default=DB_DIR, help="nuPlan DB dir; default mini, pass the val dir for standard-split eval")
     ap.add_argument("--n-scenarios", type=int, default=2)
     ap.add_argument("--reactive", type=int, default=0)
     ap.add_argument("--controller", default="two_stage_controller")

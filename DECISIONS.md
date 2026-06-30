@@ -1056,3 +1056,35 @@ Next. Parv downloads the nuPlan val logs -> token-targeted array extraction over
 (--tokens-file canonical_val14_test14hard.json) -> Phase-1 standard-split IDM re-baseline
 of the ego zoo with the pre-registered stratified inference; then the SMART realism axis
 (Phase 2) once Steffen provides the nuPlan tokenizer/codebook.
+
+
+## ADR-053: Feature regen NOT needed for eval; val data acquired; run_cells --db-dir
+Date: 2026-06-29. Status: ACTIVE.
+
+Correction to ADR-050/052. The closed-loop EVAL does not need a feature cache. Verified in
+nuplan/serving/policy_planner.py: the planner instantiates SceneFeatureExtractor() and calls
+build_input_features on the live PlannerInput each sim step (the SAME extractor as offline),
+so features are built on-the-fly during simulation. The offline f0_v3 cache was only for
+TRAINING the policy and the offline selector analysis (cl_corr / clo_selector). Therefore the
+Phase-1 standard-split re-baseline needs only: the val DB files + the existing checkpoints +
+run_cells.py targeting the val tokens. No val feature extraction is required. (Feature
+extraction on val would only be needed to RETRAIN on val, e.g. a val-CLS-labelled selector,
+which is optional and later.) The earlier "feature regeneration required" was an overstatement.
+
+Val data acquired (autonomously, no manual portal download). nuPlan is on the public AWS Open
+Data bucket s3://motional-nuplan (ap-northeast-1, --no-sign-request); boto3 is in the nuplan
+env and HPC reaches S3 via the cluster proxy. Detached job 7986967 downloaded
+public/nuplan-v1.1/nuplan-v1.1_val.zip (90.3 GB) and unzipped the val log DBs to
+/scratch/patodia.pa/nuplan/val_stage/data/cache/val/ (sensor blobs deliberately skipped).
+
+Tooling. run_cells.py now takes --db-dir (default mini) so eval can target the val DB dir.
+
+Honest scope note. The zoo checkpoints were TRAINED on the mini split (64 logs). Evaluating
+them on standard Val14/Test14-hard is a valid benchmark eval, but the absolute CLS reflects a
+mini-trained policy; the H1 / realism questions are about RELATIVE comparisons (multimodal vs
+det; IDM vs SMART) which remain valid. Training on the full train split is a separate, larger
+future lift (train_* zips are ~40-175 GB each).
+
+Next. Once unzip completes: run_cells --db-dir <val> --tokens-file val14.json / test14hard.json
+across the zoo (det, multimodal/WTA, selector, PDM-Closed) under IDM -> CLS per token -> the
+pre-registered stratified inference + F4 stratification = the Phase-1 standard-split result.
