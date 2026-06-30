@@ -1,7 +1,8 @@
-"""Compute per-token interaction-criticality (s_inter) for the Val14 tokens from the
-f0_val shards, via f4_score.score_sample (shard-side, map-API-free). Aggregates per
-token as the PEAK s_inter over the scene's samples (highest interaction moment).
-Writes {token: s_inter} for the H1 stratification of the Val14 CLS results."""
+"""Compute per-token interaction-criticality (s_inter) from f0 shards via
+f4_score.score_sample (map-API-free). Aggregates per token as PEAK over the scene's
+samples. Usage:
+  producer_val_sinter.py [shard_glob] [out_json]
+  defaults: f0_val shards -> val_sinter.json."""
 import sys, glob, json
 import numpy as np
 sys.path.insert(0, "/home/patodia.pa/av-policy-lab")
@@ -9,8 +10,8 @@ sys.path.insert(0, "/home/patodia.pa/av-policy-lab/nuplan")
 import torch
 from features.f4_score import score_sample
 
-SHARDS = "/scratch/patodia.pa/av-policy-lab/features/f0_val/task_*/scene_shard_*.pt"
-OUT = "/scratch/patodia.pa/av-policy-lab/eval_tokens/val_sinter.json"
+SHARDS = sys.argv[1] if len(sys.argv) > 1 else "/scratch/patodia.pa/av-policy-lab/features/f0_val/task_*/scene_shard_*.pt"
+OUT = sys.argv[2] if len(sys.argv) > 2 else "/scratch/patodia.pa/av-policy-lab/eval_tokens/val_sinter.json"
 
 per_tok = {}
 n_shards = 0
