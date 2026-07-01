@@ -1216,3 +1216,5 @@ Phase-1 IDM arm COMPLETE across both standard splits (Val14 ADR-055/056 + Test14
 open axis: Phase 2 (SMART learned reactive agents) -- does the multimodality/interaction conclusion
 change under realism, and does CLS-under-IDM predict CLS-under-SMART? Gated on Steffen's nuPlan
 tokenizer/codebook.
+
+### ADR-057 FINAL (8/8, n=272 each): PDM 0.9074, det 0.7463, selector 0.6951, WTA 0.6622. WTA-det=-0.084. Conclusion unchanged (multimodality underperforms; PDM>det>sel>WTA).
