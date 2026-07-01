@@ -1,0 +1,16 @@
+=== test14hard per-config CLS (under IDM) ===
+pdm        n= 272 CLS=0.9074
+det_route  n= 272 CLS=0.7463
+wta_route  n= 238 CLS=0.6542
+sel_route  n= 204 CLS=0.6929
+s_inter (test14hard_sinter.json) tokens: 183
+=== contrasts regressed on interaction-criticality (s_inter) ===
+[MULTIMODALITY (WTA-det)] n=165 mean_delta=-0.0878 (CLS_wta_route-CLS_det_route)
+   slope(delta~s_inter): beta1=-0.0646 se=0.0547 t=-1.18 p2=0.244 clusters=28
+   TOST(|slope|<0.05): p=0.605 ci90=[-0.15458795478013426, 0.02542489960179206] equivalent=False
+[SELECTOR (sel-det)] n=129 mean_delta=-0.0557 (CLS_sel_route-CLS_det_route)
+   slope(delta~s_inter): beta1=-0.0277 se=0.0575 t=-0.48 p2=0.638 clusters=27
+   TOST(|slope|<0.05): p=0.349 ci90=[-0.12218246704144216, 0.06683241901261404] equivalent=False
+[SELECTOR vs WTA (sel-wta)] n=111 mean_delta=+0.0323 (CLS_sel_route-CLS_wta_route)
+   slope(delta~s_inter): beta1=-0.0208 se=0.0287 t=-0.73 p2=0.428 clusters=27
+   TOST(|slope|<0.05): p=0.155 ci90=[-0.06809961930564666, 0.02642032854905002] equivalent=False

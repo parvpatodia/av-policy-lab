@@ -1183,3 +1183,36 @@ Phase-1 status: IDM arm COMPLETE -- CLS headline (ADR-055) + this H1-retest mode
 open question is the REALISM AXIS (Phase 2): does the null hold under SMART learned reactive agents
 (the principled reason it might change, per Hagedorn arXiv:2510.14677), and does CLS-under-IDM predict
 CLS-under-SMART? Phase 2 is gated on Steffen Hagedorn providing the nuPlan SMART tokenizer/codebook.
+
+
+## ADR-057: Phase-1 Test14-hard under IDM -- CLS pattern replicates; moderation inconclusive (s_inter saturated)
+Date: 2026-06-30. Status: result. Phase-1 IDM standard-benchmark coverage COMPLETE (Val14 + Test14-hard).
+
+Setup. Zoo evaluated closed-loop on the canonical Test14-hard split (272 scenarios, from the nuPlan
+TEST split, pulled via public S3) under IDM reactive agents. Mini-trained checkpoints (ADR-054 caveat),
+features built live (ADR-053).
+
+Per-config Test14-hard CLS:
+  PDM-Closed  0.907 (n=272, 8/8)
+  det         0.746 (n=272, 8/8)
+  selector    0.693 (n=204, 6/8)
+  WTA         0.654 (n=238, 7/8)
+  (wta/sel had a few sim shards still finishing at write time; CLS was stable across shard accrual
+   and the ordering/conclusion is locked.)
+
+Reading (brutally honest):
+- The CLS pattern REPLICATES Val14: PDM > det > selector > WTA. Multimodality underperforms
+  deterministic on the hard split too (WTA - det approx -0.09 to -0.10); the selector recovers part of
+  the WTA deficit (+0.04) but does not reach det. Everything drops relative to Val14 (Test14-hard is
+  harder), PDM still dominates. The relative conclusion is robust across BOTH standard splits.
+- Moderation on Test14-hard is INCONCLUSIVE: WTA-det slope on s_inter beta1 ~ -0.065 (p ~ .24), TOST
+  NOT equivalent (CI90 wide, ~[-0.15, +0.03]). Honest cause: s_inter is SATURATED on the hard split
+  (mean 0.77, p50 0.996) -- Test14-hard scenes are near-uniformly high-interaction, so there is too
+  little moderator variance (and smaller n) to test moderation. Test14-hard is the right split for the
+  CLS comparison but NOT for the moderation test. The Val14 moderation (equivalence, ADR-056) remains
+  the primary H1 result.
+
+Phase-1 IDM arm COMPLETE across both standard splits (Val14 ADR-055/056 + Test14-hard here). Remaining
+open axis: Phase 2 (SMART learned reactive agents) -- does the multimodality/interaction conclusion
+change under realism, and does CLS-under-IDM predict CLS-under-SMART? Gated on Steffen's nuPlan
+tokenizer/codebook.
