@@ -49,5 +49,7 @@ echo "F0-boston task ${SLURM_ARRAY_TASK_ID}/15  node=$(hostname)  DATA=$DATA_ROO
     --num-scenarios-per-type 20 \
     --stride 5 \
     --perturb-prob 0.5
-NSHARDS=$(ls "$TASK_OUT"/*.pt 2>/dev/null | wc -l)
+# find (not ls-glob) so an empty output dir does not trip pipefail (a cleanly
+# skipped/empty task must exit 0, not FAILED 2:0).
+NSHARDS=$(find "$TASK_OUT" -name '*.pt' 2>/dev/null | wc -l)
 echo "task ${SLURM_ARRAY_TASK_ID} DONE $(date) — shards: $NSHARDS"

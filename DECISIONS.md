@@ -1386,3 +1386,23 @@ Shard layout confirmed identical to f0_v3 (task_NNNN/scene_shard_*.pt), so both 
 Next after training: eval on Val14 -- per-mode array (WTA_MODE_INDEX 0..5, Boston wta ckpt) + det zoo ->
 oracle vs det vs default-WTA vs random; compare gaps to ADR-058/059. Reproduce -> add selector + scale to
 full subset; not -> report fragility (still a real finding). Files added: train_boston_{det,wta}.sbatch.
+
+
+## ADR-064: Boston f0 extraction healthy -- empty-task diagnosis + scale confirmed
+Date: 2026-07-10. Status: monitoring. Selection-bottleneck study, step 3, Boston de-risk.
+
+Mid-run check of job 8271900 (f0_boston): 10/16 tasks productive; 6 (3,4,5,7,10,15) exited
+"No scenarios found -- exiting cleanly." Diagnosis: the 64-log subset was the FIRST 64 sorted logs,
+which are temporally clustered (same recording sessions veh-28/veh-40, Aug 18-20); some consecutive
+segments carry no tagged scenarios (nuPlan scenario-type tags are sparse), so num_scenarios_per_type
+found nothing there. NOT a pipeline fault -- the 10 productive tasks extract normally.
+
+Scale is NOT a concern: each shard holds 616 samples (measured), so ~42 shards so far = ~25k samples
+and growing; the trainers cap at 16000 (wta) / batch over all (det), so abundant. The empty tasks only
+mildly reduce log DIVERSITY (~40 distinct logs of real Boston data), acceptable for the de-risk. If the
+core reproduces, the full bos+pitt+sing scale-up restores full diversity (and a RANDOM log sample, not
+first-N-sorted, will avoid the clustering).
+
+Fixed a cosmetic sbatch bug: the trailing "ls TASK_OUT/*.pt | wc -l" tripped pipefail on empty dirs,
+marking cleanly-skipped tasks FAILED 2:0. Switched to find (exits 0 on no match). Real extraction was
+always fine. Next: let f0 finish, then launch train_boston_det + train_boston_wta.
