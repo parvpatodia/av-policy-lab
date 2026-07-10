@@ -1276,3 +1276,27 @@ core; SMART realism is the later robustness axis.
 
 Caveats: n=300 Val14 subset; mini-trained checkpoints (provisional). The retrain is the credibility step
 and the reviewer-critical requirement.
+
+
+## ADR-060: Retrain data pipeline de-risked -- exact train-split keys/sizes confirmed on public S3
+Date: 2026-07-10. Status: readiness. Selection-bottleneck study, pre-step-3 (retrain gate).
+
+Before committing the full-train retrain, verified the download path end-to-end WITHOUT downloading:
+S3 (bucket motional-nuplan, region ap-northeast-1, UNSIGNED via cluster proxy 10.99.0.130:3128)
+lists cleanly; dl_split.py head_object path is correct. Exact train-split objects:
+  public/nuplan-v1.1/nuplan-v1.1_train_boston.zip       35.5 GB
+  public/nuplan-v1.1/nuplan-v1.1_train_pittsburgh.zip   28.5 GB
+  public/nuplan-v1.1/nuplan-v1.1_train_singapore.zip    32.6 GB
+  (vegas_1..6 skipped -- ~850 GB, off-distribution-heavy, low marginal value)
+Subset bos+pitt+sing = 96.6 GB compressed (~150 GB extracted).
+
+Implication for the retrain decision: a SCOPED de-risk run (Boston only, 35.5 GB) validates the full
+pipeline (download -> extract -> token-targeted f0 -> train det+wta+selector -> selection study) on
+real train data in days, not the ~1-1.5 wk the full subset costs on shared A100s. If Boston-only
+reproduces the standard-split gate (oracle-vs-selector gap + feedforward-unpredictability mechanism),
+scale to the full subset with confidence; if it does not, the result is fragile and 1+ wk of cluster
+time is saved. This is the capital-efficient path and does not commit the large spend prematurely.
+
+Gate status unchanged (ADR-058/059 PASSED). Retrain GO/NO-GO is Parv's call (shared-cluster capital +
+paper-strategy bet); surfaced with recommendation = scoped Boston-first de-risk. SMART realism axis
+(Hagedorn) remains the later differentiator, blocked on code release (no timeline).
