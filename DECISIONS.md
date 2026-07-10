@@ -1246,3 +1246,33 @@ Caveats: n=300 Val14 subset; mini-trained checkpoints (provisional numbers). Ful
 GATE (half 1 of 2): the oracle-vs-selector gap HOLDS strongly on the standard split. Next: the mechanism
 (cl_corr -- do pre-decision scene features predict per-mode closed-loop CLS on Val14? prior r~0.11). If
 the mechanism holds too, commit to the full-train retrain for credible numbers.
+
+
+## ADR-059: Selection mechanism -- feedforward mode selection is worse than random; GATE PASSED
+Date: 2026-06-30. Status: result. Selection-bottleneck study, step 2 (mechanism) + gate.
+
+On Val14 (n=300), per-mode CLS means: [0.711, 0.674, 0.747, 0.796, 0.792, 0.657]
+  -> random-mode baseline = mean of per-mode means = 0.730.
+Comparison on the same tokens:
+  oracle (best-of-6)             0.868
+  det                            0.810
+  learned CLS-selector           0.747   (barely above random)
+  RANDOM mode                    0.730
+  default WTA (imitation score)  0.705   (BELOW random)
+
+Mechanism. The imitation score head ranks modes WORSE than random for closed-loop outcome
+(0.705 < 0.730), i.e. its confidence is anti-informative for closed-loop selection. A selector
+trained directly on closed-loop CLS labels barely beats random (0.747) and remains 0.121 below the
+oracle. So closed-loop mode-value is not recoverable from pre-decision signals -- feedforward
+selection is the bottleneck. This is consistent with GATE-CL-1 (open-loop proxy vs closed-loop CLS,
+r=0.11) and it is the novel, mechanistic part of the contribution.
+
+GATE (both halves): PASSED.
+  half 1 -- oracle-vs-selector gap +0.121 on the standard split (ADR-058).
+  half 2 -- mechanism: feedforward mode selection <= random; purpose-trained selector still 0.121
+            below oracle.
+-> Proceed to the full-train retrain (credibility step), then the selection study becomes the paper's
+core; SMART realism is the later robustness axis.
+
+Caveats: n=300 Val14 subset; mini-trained checkpoints (provisional). The retrain is the credibility step
+and the reviewer-critical requirement.
