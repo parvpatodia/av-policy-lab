@@ -1357,3 +1357,32 @@ fine before the kill). Extraction runs on compute nodes (16 G/task). Task 0 of t
 LAUNCHED: job 8271900 (f0_boston_array.sbatch, array 0-15) -> features/f0_boston. Next: verify task 0
 writes shards, then train det + wta(6) + selector on f0_boston (train_policy.py, GPU), CLS-select, and
 re-run the selection study on Val14. Files added: nuplan/slurm/f0_boston_array.sbatch.
+
+
+## ADR-063: Boston de-risk training scope -- core (det+wta) first, selector deferred to scale-up
+Date: 2026-07-10. Status: prepped. Selection-bottleneck study, step 3 (retrain), Boston de-risk.
+
+The full selection-study training chain has three parts: det (train_policy.py), the 6-mode WTA head
+(wta_derisk_train.py: SceneEncoder+WTAHead, 16000 scenes, 4000 steps), and the closed-loop SELECTOR
+(clo_selector.py retrains ONLY the score head on per-mode closed-loop CLS labels from sim -- which
+first requires running the WTA head per-mode through closed-loop on TRAIN tokens to produce those
+labels; the base scorer comes from rl_train.py).
+
+De-risk sequencing (capital-efficient): the GATE's core reproduces from det + wta ALONE, evaluated on
+Val14 --
+  - latent value: per-mode oracle (WTA_MODE_INDEX 0..5) > det?
+  - mechanism half: default WTA imitation-score selection <= random mode?
+These need no selector. The purpose-trained selector (rl_clsel: rl_train + per-mode train-CLS labels +
+clo_selector, the expensive sim-heavy chain) is the REFINEMENT (ADR-058's "even a CLS-trained selector
+leaves +0.121") -- add it in the scale-up ONLY if the core reproduces on real Boston data.
+
+Prepped sbatches (both gated on f0_boston completion; GPU/pytorch_env, absolute python):
+  train_boston_det.sbatch -- train_policy.py --head det --goal route --data-root f0_boston, 150 ep,
+      patience 9999, ckpt-every 25 -> runs/boston_derisk (mirrors f5 det_route, only data changes).
+  train_boston_wta.sbatch -- wta_derisk_train.py --n-modes 6 --steps 4000 --n-scenes 16000 (mini scale)
+      --shard-glob f0_boston -> runs/boston_derisk/wta_boston_s4000.pt.
+Shard layout confirmed identical to f0_v3 (task_NNNN/scene_shard_*.pt), so both trainers find Boston data.
+
+Next after training: eval on Val14 -- per-mode array (WTA_MODE_INDEX 0..5, Boston wta ckpt) + det zoo ->
+oracle vs det vs default-WTA vs random; compare gaps to ADR-058/059. Reproduce -> add selector + scale to
+full subset; not -> report fragility (still a real finding). Files added: train_boston_{det,wta}.sbatch.
