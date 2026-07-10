@@ -1,0 +1,8 @@
+tokens with all 6 modes: 300
+tokens with oracle+det+sel: 300
+per-mode means: {0: 0.7113, 1: 0.6744, 2: 0.7474, 3: 0.7955, 4: 0.792, 5: 0.6571}
+oracle 0.8679  det 0.8095  sel 0.7471  wta 0.7050  (n=300)
+latent value  (oracle-det) +0.0584
+realized      (sel-det)    -0.0624
+UNREALIZED selection gap (oracle-sel) +0.1208
+frac scenes some mode beats det: 0.477

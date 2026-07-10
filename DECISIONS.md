@@ -1218,3 +1218,31 @@ change under realism, and does CLS-under-IDM predict CLS-under-SMART? Gated on S
 tokenizer/codebook.
 
 ### ADR-057 FINAL (8/8, n=272 each): PDM 0.9074, det 0.7463, selector 0.6951, WTA 0.6622. WTA-det=-0.084. Conclusion unchanged (multimodality underperforms; PDM>det>sel>WTA).
+
+
+## ADR-058: Selection-bottleneck confirmed on the standard split (Val14) -- oracle-vs-selector gap is large
+Date: 2026-06-30. Status: result. Selection-bottleneck study, step 1.
+
+Per-mode closed-loop eval on Val14 (n=300 subset), WTA modes 0..5 forced via WTA_MODE_INDEX, IDM.
+Per-mode CLS: [0.711, 0.674, 0.747, 0.796, 0.792, 0.657].
+  oracle (best-of-6)   0.8679
+  det                  0.8095
+  learned selector     0.7471
+  WTA (default score)  0.7050
+Gaps:
+  latent value  (oracle - det)              +0.058   modes contain trajectories that beat deterministic
+  realized      (selector - det)            -0.062   the learned selector is BELOW det
+  UNREALIZED selection gap (oracle - sel)   +0.121   selector realizes ~none of the latent value
+  frac scenes some mode beats det:           0.48
+
+Reading. The multimodality deficit is a SELECTION failure, not a modes failure. On the standard split
+the modes carry real latent value (oracle > det by +0.058; ~half of scenes have a mode that beats det),
+but the learned selector captures none of it (0.121 below oracle, 0.062 below det). This replicates
+ADR-049 (old subset) on Val14 and confirms the selection-bottleneck framing that Steffen Hagedorn
+independently flagged.
+
+Caveats: n=300 Val14 subset; mini-trained checkpoints (provisional numbers). Full-Val14 + retrain pending.
+
+GATE (half 1 of 2): the oracle-vs-selector gap HOLDS strongly on the standard split. Next: the mechanism
+(cl_corr -- do pre-decision scene features predict per-mode closed-loop CLS on Val14? prior r~0.11). If
+the mechanism holds too, commit to the full-train retrain for credible numbers.
