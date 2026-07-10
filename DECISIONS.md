@@ -1300,3 +1300,37 @@ time is saved. This is the capital-efficient path and does not commit the large 
 Gate status unchanged (ADR-058/059 PASSED). Retrain GO/NO-GO is Parv's call (shared-cluster capital +
 paper-strategy bet); surfaced with recommendation = scoped Boston-first de-risk. SMART realism axis
 (Hagedorn) remains the later differentiator, blocked on code release (no timeline).
+
+
+## ADR-061: Scoped Boston-first de-risk retrain -- APPROVED; verified pipeline recorded
+Date: 2026-07-10. Status: in-progress. Selection-bottleneck study, step 3 (retrain), scoped.
+
+Parv approved the scoped Boston-first de-risk (over full bos+pitt+sing up front): download Boston only,
+run the full pipeline on real train data, and scale to the full subset ONLY if the standard-split gate
+(oracle-vs-selector gap + feedforward-unpredictability mechanism) reproduces. Capital-efficient; caps
+downside at ~1 city if the result is fragile.
+
+VERIFIED pipeline (reconnaissance this session, corrects an earlier wrong assumption):
+- Training does NOT read raw DBs live. The production trainer nuplan/training/train_policy.py reads
+  PRE-EXTRACTED f0 feature shards via F0ShardDataset(--data-root). (train_diffusion_policy.py with its
+  hardcoded Mac DB_DIR is an older/unused path -- ignore it.)
+- So f0 extraction over Boston is a REQUIRED step and the real bottleneck, not the download.
+- Mini training set reference: features/f0_v3 = 43 GB, 17 shard-task dirs.
+- Trainer args: train_policy.py --head {det,diff,wta} --n-modes 6 --goal {route,precise}
+  --data-root <f0dir> --ckpt-dir <out> --epochs 150 (GPU partition, pytorch_env, ABSOLUTE python).
+- Selector (closed-loop mode selection, rl_clsel.pt / rl_long_s6000.pt) is trained on top of the frozen
+  WTA head by nuplan/analysis/wta_derisk_train.py + clo_selector.py.
+- Eval split held CONSTANT at Val14 (val_stage already downloaded); only training data changes
+  mini -> Boston, isolating the data-quality effect. s_inter for Val14 already extracted (f0_val).
+
+Ordered steps:
+  1. [LAUNCHED] Download+extract Boston (job 8271334, dl_boston.sbatch -> /scratch/.../nuplan/train_stage).
+  2. f0 extraction over Boston scenarios -> features/f0_boston (scope: match/modestly exceed mini scale
+     for a clean same-scale mini-vs-real comparison; balanced sampling via --num-scenarios-per-type).
+  3. Train det + wta(6) on f0_boston (train_policy_array-style, GPU); then train the selector (rl_clsel)
+     on the frozen Boston WTA head.
+  4. CLS-select best epoch (cls_select on frozen disjoint probe).
+  5. Re-run the selection study (per-mode oracle + zoo) on Val14 with Boston checkpoints; compare gaps to
+     ADR-058/059. Reproduce -> scale to full subset; not -> report fragility (still a real finding).
+
+Files added: nuplan/slurm/dl_boston.sbatch. Gate ADR-058/059 unchanged. SMART axis still later/blocked.
