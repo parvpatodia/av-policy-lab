@@ -1334,3 +1334,26 @@ Ordered steps:
      ADR-058/059. Reproduce -> scale to full subset; not -> report fragility (still a real finding).
 
 Files added: nuplan/slurm/dl_boston.sbatch. Gate ADR-058/059 unchanged. SMART axis still later/blocked.
+
+
+## ADR-062: Boston de-risk retrain step 2 -- matched-scale f0 extraction launched
+Date: 2026-07-10. Status: in-progress. Selection-bottleneck study, step 3 (retrain), Boston de-risk.
+
+Step 1 (download+extract) DONE: job 8271334, 1647 Boston log DBs at
+/scratch/patodia.pa/nuplan/train_stage/data/cache/train_boston (35.5 GB compressed).
+
+Scope decision (matched-scale, isolates data SOURCE from scale): built a 64-log Boston subset
+(boston_sub64/, symlinks to the first 64 sorted DBs) to MIRROR mini's 64 DBs exactly. f0 extraction
+uses the IDENTICAL f0_v3 recipe -- 16 array tasks (4 DBs/task), --num-scenarios-per-type 20 --stride 5
+--perturb-prob 0.5 -- changing ONLY the data root mini -> real Boston train-split. So a reproduced gate
+at matched scale is a clean "real data reproduces" signal; the full bos+pitt+sing run later adds scale.
+WHY subset not all 1647: the balanced per-type cap is per-task, so all-Boston (~103 DBs/task) would
+blow up both wall time (linear in DBs scanned) and cache size; matched-scale is the disciplined first cut.
+
+Smoke note: an interactive login-node smoke was SIGKILLed at 9 s (rc=137) when the Boston map layer
+loaded -- a login-node cgroup artifact, NOT a pipeline fault (the builder enumerated Boston scenarios
+fine before the kill). Extraction runs on compute nodes (16 G/task). Task 0 of the array is the canary.
+
+LAUNCHED: job 8271900 (f0_boston_array.sbatch, array 0-15) -> features/f0_boston. Next: verify task 0
+writes shards, then train det + wta(6) + selector on f0_boston (train_policy.py, GPU), CLS-select, and
+re-run the selection study on Val14. Files added: nuplan/slurm/f0_boston_array.sbatch.
