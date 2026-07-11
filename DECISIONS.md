@@ -1443,3 +1443,11 @@ Boston WTA head -> eval/permode_boston_r1. Next: when det finishes, run the det 
 tokens, then analyze_permode -> compare Boston oracle/det/default-WTA/random gaps to ADR-058/059
 (mini). Reproduce -> add selector + scale to full subset; not -> report fragility.
 Files added: nuplan/slurm/permode_boston_array.sbatch.
+
+## ADR-067: Boston de-risk zoo eval -- default-WTA launched, det pending
+Date: 2026-07-10. Status: in-progress. Step 4.
+boston_zoo_array.sbatch (2 cfgs x 4 shards on val14_sub300, IDM): cfg0 det_route (Boston det best.pt),
+cfg1 wta_route (Boston WTA DEFAULT argmax = imitation-score default-WTA). Launched cfg1 now (job 8279921,
+array 4-7). cfg0 (det, array 0-3) launches when det training finishes (best.pt). Together with
+permode_boston_r1 (oracle+random) -> full core: oracle/det/default-WTA/random vs ADR-058/059. sel deferred.
+det 8277524 at epoch ~42 minADE 0.126; per-mode 8278183 running (closed-loop, few h).
