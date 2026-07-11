@@ -1524,3 +1524,29 @@ Coherent honest picture so far:
 PENDING: det (oracle-vs-det latent value, PRIMARY claim; det 8277524 epoch 113/150 ~1.75h; det zoo
 8281301 chained). After det: full verdict + gate decision to surface to Parv. n=300, Boston-only, single
 seed, plain-WTA -> provisional.
+
+
+## ADR-072: Two confounds framing the imminent oracle-vs-det read (interpret with care)
+Date: 2026-07-11. Status: methodology. Selection-bottleneck study, step 4, Boston de-risk.
+
+Before det zoo lands, pin down what the oracle-vs-det number can and cannot say, so it is not misread.
+
+Confound A (recipe): mini per-mode/default-WTA used rl_long_s6000 (RL-trained scorer); Boston used plain
+wta_derisk_train (no RL scorer). Affects the default-WTA-vs-random magnitude (ADR-070).
+
+Confound B (training budget, quantified): det (train_policy) = ~1521 steps/epoch x 150 ep = ~228k
+optimizer steps (~14.6M sample-views); the Boston WTA head = 4000 steps (256k sample-views). det is
+optimized ~57x longer. det converged to minADE 0.070 (very strong); the WTA modes are bounded-budget.
+=> if oracle(best-of-6 WTA modes) <= det, that is PARTLY because det is far better optimized, NOT proof
+that "the modes carry no latent value / selection is fine." A clean latent-value test needs det and wta
+trained to MATCHED budgets.
+
+What is NOT confounded and DID reproduce: cl_corr (ADR-071, r=0.071 ~ mini 0.11) -- it uses the reward
+proxy on the deployed mode, independent of recipe and of absolute policy strength. The
+feedforward-unpredictability MECHANISM (the novel claim) holds on real data.
+
+Plan after det zoo: report oracle/det/default-WTA/random WITH both confounds explicit; do NOT claim the
+gate reproduces or fails from the magnitudes alone. Then surface to Parv the gate decision: whether the
+full retrain should use MATCHED recipe+budget for det+wta+selector (the clean design), given (i) the
+mechanism reproduces cleanly but (ii) the raw Boston magnitudes are weak+confounded. n=300, single seed,
+Boston-only -> provisional. Consolidates ADR-070/071.
