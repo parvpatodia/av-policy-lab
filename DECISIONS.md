@@ -1406,3 +1406,19 @@ first-N-sorted, will avoid the clustering).
 Fixed a cosmetic sbatch bug: the trailing "ls TASK_OUT/*.pt | wc -l" tripped pipefail on empty dirs,
 marking cleanly-skipped tasks FAILED 2:0. Switched to find (exits 0 on no match). Real extraction was
 always fine. Next: let f0 finish, then launch train_boston_det + train_boston_wta.
+
+
+## ADR-065: Boston f0 finalized; det+wta training launched
+Date: 2026-07-10. Status: in-progress. Selection-bottleneck study, step 3, Boston de-risk.
+
+f0_boston finalized: 14/16 tasks completed; the 2 slow tasks (12,14, at 3:49 on rich logs) were
+cancelled for a clean stable snapshot -- their marginal data is unneeded. Final set = 180 shards / 11 GB
+= ~110k samples (616/shard), 7x the 16k the trainers cap at. Data path de-risked by construction:
+f0_boston layout is identical to f0_v3 (proven with train_policy.py in the f5 run).
+
+LAUNCHED (GPU, detached):
+  8277524 bos-det -- train_policy.py --head det --goal route --data-root f0_boston, 150 ep -> runs/boston_derisk
+  8277525 bos-wta -- wta_derisk_train.py --n-modes 6 --steps 4000 --n-scenes 16000 -> runs/boston_derisk/wta_boston_s4000.pt
+Both PD (Priority) awaiting a GPU. Next fire: confirm they start + train; on completion, eval the
+selection study on Val14 (per-mode WTA_MODE_INDEX 0..5 with the Boston wta ckpt + det zoo) and compare
+oracle/det/default-WTA/random gaps to ADR-058/059. Reproduce -> add the selector + scale to full subset.
