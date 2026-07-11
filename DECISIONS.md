@@ -1467,3 +1467,35 @@ per-mode modes 0-3 done (4/4); modes 4,5 + default-WTA (8279921) still in closed
 (boston_zoo det_route array 0-3) with --dependency=afterany:8277524 -> auto-launches on det end using
 final best.pt (afterany so it runs even if det times out; boston_zoo guards on best.pt existing). When
 per-mode(0-5)+det+default-WTA all land: run analyze_permode_boston.py permode_boston_r1 boston_zoo_r1.
+
+
+## ADR-070: Boston de-risk PARTIAL -- selection signal looks WEAK; recipe confound flagged
+Date: 2026-07-10. Status: preliminary (det pending). Selection-bottleneck study, step 4, Boston de-risk.
+
+Partial core on real Boston data, Val14 sub300, n=300 (all 6 modes + default-WTA done; det pending):
+  per-mode means  {0:0.629, 1:0.639, 2:0.625, 3:0.636, 4:0.600, 5:0.640}   (TIGHT, ~0.60-0.64)
+  ORACLE (best-of-6)   0.678
+  default-WTA          0.647
+  RANDOM               0.628
+  default-WTA vs random  +0.019   [mini ADR-058: -0.025, i.e. BELOW random]
+  oracle vs default-WTA  +0.031   [mini: +0.163]
+  oracle vs random       +0.050
+
+HONEST READ (preliminary): the dramatic mini selection-bottleneck signal does NOT cleanly reproduce at
+matched scale on real Boston data. (1) The headline mini MECHANISM -- imitation-score selection WORSE
+than random -- FLIPS: on Boston default-WTA is slightly ABOVE random (+0.019). (2) The oracle headroom
+COLLAPSES: modes cluster tightly (0.60-0.64), so best-of-6 barely exceeds random (+0.050) or default-WTA
+(+0.031), vs mini's +0.163 oracle-over-default-WTA. Fewer diverse "good modes" on real data.
+
+CONFOUND (leading caveat, must not be buried): mini's per-mode + default-WTA used the rl_long_s6000
+(RL-trained scorer) lineage; the Boston de-risk used plain wta_derisk_train (no RL scorer). So this
+changes DATA and RECIPE together -- not a clean isolation. The score-head calibration differs by KIND,
+which alone could move default-WTA-vs-random. A clean test needs the SAME recipe (rl_long) on Boston.
+
+STILL PENDING before any gate judgment: (a) det (oracle-vs-det latent value -- the PRIMARY claim; det
+8277524 at epoch ~103/150, ~2h; det zoo 8281301 chained). (b) cl_corr mechanism (recipe-independent;
+job 8282240 launched -> pearson(open-loop proxy, closed-loop CLS) vs mini r=0.11).
+
+Do NOT conclude reproduction or non-reproduction yet. If, after det + cl_corr, the signal stays weak,
+surface to Parv the gate decision: clean rl_long-on-Boston reproduction vs proceed-to-full vs reconsider.
+n=300, Boston-only, matched-scale, single seed, plain-WTA recipe -> provisional.
