@@ -1459,3 +1459,11 @@ Confirms the Boston-trained WTA closed-loop eval produces sane numbers (not garb
 Boston per-mode means cluster ~0.63, tighter+lower than mini per-mode [0.657,0.796] (ADR-058); the oracle
 (best-of-6) + det + default-WTA decide the gate and are still running. det 8277524 epoch 63 minADE 0.094;
 modes 4,5 + default-WTA (8279921) still in closed-loop. det zoo (array 0-3) launches on final best.pt.
+
+## ADR-069: det zoo chained via SLURM dependency (autonomous advance)
+Date: 2026-07-10. Status: monitoring. Step 4.
+per-mode modes 0-3 done (4/4); modes 4,5 + default-WTA (8279921) still in closed-loop (~1-1.5h). det
+8277524 epoch 71 minADE 0.085 (~4h to epoch 150, ~40min wall margin). Queued det zoo 8281301
+(boston_zoo det_route array 0-3) with --dependency=afterany:8277524 -> auto-launches on det end using
+final best.pt (afterany so it runs even if det times out; boston_zoo guards on best.pt existing). When
+per-mode(0-5)+det+default-WTA all land: run analyze_permode_boston.py permode_boston_r1 boston_zoo_r1.
