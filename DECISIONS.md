@@ -1499,3 +1499,28 @@ job 8282240 launched -> pearson(open-loop proxy, closed-loop CLS) vs mini r=0.11
 Do NOT conclude reproduction or non-reproduction yet. If, after det + cl_corr, the signal stays weak,
 surface to Parv the gate decision: clean rl_long-on-Boston reproduction vs proceed-to-full vs reconsider.
 n=300, Boston-only, matched-scale, single seed, plain-WTA recipe -> provisional.
+
+
+## ADR-071: Boston MECHANISM reproduces (cl_corr r=0.071) -- novel claim survives on real data
+Date: 2026-07-11. Status: result (det still pending). Selection-bottleneck study, step 4, Boston de-risk.
+
+cl_corr on real Boston models (Boston WTA head, Val14 f0 features, Boston default-WTA deployed CLS,
+n=300): pearson(open-loop proxy reward, closed-loop CLS) = 0.071, spearman = -0.00 (proxy_mean -0.385,
+cls_mean 0.647). Mini (GATE-CL-1/ADR-048) was r=0.11. => the open-loop proxy is ~orthogonal to closed-
+loop CLS on REAL data too; the feedforward-unpredictability MECHANISM REPRODUCES (even slightly lower r).
+
+This is the recipe-INDEPENDENT test (uses the reward proxy on the deployed top-scored mode, not the
+score-head calibration), so unlike the default-WTA-vs-random magnitude (ADR-070, confounded by
+wta_derisk vs rl_long) it is a clean reproduction. It is exactly the "novel part" per the honesty note:
+the closed-loop-unpredictability mechanism. It HOLDS on real Boston training data.
+
+Coherent honest picture so far:
+- MECHANISM (open-loop ⊥ closed-loop, feedforward can't predict per-mode closed-loop value): reproduces
+  robustly (Boston r=0.071 ~ mini 0.11; near-zero spearman).
+- GAP MAGNITUDE (oracle headroom; default-WTA-vs-random): weaker/smaller on Boston plain-WTA
+  (oracle-default +0.031 vs mini +0.163; default-WTA +0.019 ABOVE random vs mini -0.025). Depends on
+  mode diversity + scorer miscalibration, which differ by recipe (confounded).
+
+PENDING: det (oracle-vs-det latent value, PRIMARY claim; det 8277524 epoch 113/150 ~1.75h; det zoo
+8281301 chained). After det: full verdict + gate decision to surface to Parv. n=300, Boston-only, single
+seed, plain-WTA -> provisional.
