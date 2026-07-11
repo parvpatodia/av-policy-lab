@@ -1422,3 +1422,24 @@ LAUNCHED (GPU, detached):
 Both PD (Priority) awaiting a GPU. Next fire: confirm they start + train; on completion, eval the
 selection study on Val14 (per-mode WTA_MODE_INDEX 0..5 with the Boston wta ckpt + det zoo) and compare
 oracle/det/default-WTA/random gaps to ADR-058/059. Reproduce -> add the selector + scale to full subset.
+
+
+## ADR-066: Boston WTA trained; per-mode Val14 eval launched (ckpt compat verified)
+Date: 2026-07-10. Status: in-progress. Selection-bottleneck study, step 4, Boston de-risk.
+
+Boston WTA training DONE: wta_boston_s4000.pt (loss 5.26 -> 0.177 over 4000 steps on 16k Boston scenes).
+Boston DET training running cleanly (job 8277524, ~171s/epoch, minADE 3.97 -> 0.32 by epoch 8; ~7h to
+epoch 150, fits the 7:55 wall).
+
+Ckpt-compat verified before launch (avoided a load-failure job): the eval planner
+(nuplan/serving/policy_planner.py load_ema_into) uses ONLY ckpt["encoder"] + ckpt["head"]; it ignores
+the "rl" key that rl_long has and wta_boston lacks. WTA path returns per-mode (trajs, scores) from the
+head itself: WTA_MODE_INDEX forces a mode (oracle); default = scores.argmax() = the "imitation-score"
+default-WTA of ADR-058. So wta_boston fully supports oracle + default-WTA + random on Val14.
+
+LAUNCHED (parallel with det training): job 8278183 (permode_boston_array, array 0-23%16) -- per-mode
+closed-loop CLS on the SAME 300-token Val14 subset as ADR-058, reactive IDM, goal route, with the
+Boston WTA head -> eval/permode_boston_r1. Next: when det finishes, run the det zoo eval on the same
+tokens, then analyze_permode -> compare Boston oracle/det/default-WTA/random gaps to ADR-058/059
+(mini). Reproduce -> add selector + scale to full subset; not -> report fragility.
+Files added: nuplan/slurm/permode_boston_array.sbatch.
