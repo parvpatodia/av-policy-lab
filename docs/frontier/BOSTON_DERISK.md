@@ -13,17 +13,26 @@ efficient gate before committing the full bos+pitt+singapore retrain (Parv-appro
 - Eval: Val14 sub300 (SAME 300 tokens as ADR-058), IDM reactive, PDM-style CLS. Per-mode via
   WTA_MODE_INDEX 0..5 (oracle + random); default-WTA = head argmax (imitation score).
 
-## Results (n=300)
-| quantity | Boston | mini (ADR-058/059) |
+## Results (plain-WTA, n=300) -- CONFOUNDED baseline
+| quantity | Boston plain-WTA | mini (ADR-058/059) |
 |---|---|---|
 | oracle (best-of-6) | 0.678 | 0.868 |
-| det | [PENDING det zoo] | 0.810 |
+| det | 0.737 | 0.810 |
 | default-WTA (imitation score) | 0.647 | 0.705 |
 | random mode | 0.628 | 0.730 |
 | default-WTA - random (mechanism) | +0.019 (ABOVE) | -0.025 (BELOW) |
 | oracle - default-WTA | +0.031 | +0.163 |
-| oracle - det (latent value) | [PENDING] | +0.058 |
+| oracle - det (latent value) | **-0.059 (det WINS)** | +0.058 |
+| frac scenes some mode beats det | 0.337 | 0.48 |
 | cl_corr pearson(open-loop proxy, closed-loop CLS) | 0.071 | 0.11 |
+
+The oracle-det = -0.059 (det beats best-of-6) is the OPPOSITE sign to mini, but it is confounded: the
+plain WTA head (wta_derisk_train, 4000 steps) was trained ~57x less than det (train_policy, 150 ep,
+minADE 0.070). See the matched-budget test below.
+
+## Matched-budget WTA (removes confounds A+B) -- IN PROGRESS
+Training a 6-mode WTA head with the IDENTICAL trainer/budget as det (train_policy.py --head wta, 150 ep;
+job 8285695). Then re-run per-mode eval -> a FAIR oracle-vs-det. Result: [PENDING].
 
 ## Findings
 1. MECHANISM REPRODUCES (clean). cl_corr = 0.071 (spearman ~0), ~ mini 0.11: the open-loop proxy is
@@ -32,7 +41,8 @@ efficient gate before committing the full bos+pitt+singapore retrain (Parv-appro
 2. GAP MAGNITUDES SHRINK. Oracle headroom over default-WTA collapses (+0.031 vs mini +0.163); modes
    cluster tightly (per-mode means 0.60-0.64). The mini "imitation selection worse than random" FLIPS
    to slightly-above-random (+0.019).
-3. oracle-vs-det (the PRIMARY latent-value claim): PENDING (det zoo running).
+3. oracle-vs-det (PRIMARY latent-value claim), plain-WTA: -0.059 -- det BEATS the best-of-6 oracle
+   (opposite sign to mini +0.058), but budget-confounded (~57x). Matched-budget test in progress.
 
 ## Confounds (do not read the magnitudes as a clean reproduction)
 - Recipe: mini per-mode/default-WTA used rl_long (RL-trained scorer); Boston used plain wta_derisk_train
