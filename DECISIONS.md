@@ -1451,3 +1451,11 @@ cfg1 wta_route (Boston WTA DEFAULT argmax = imitation-score default-WTA). Launch
 array 4-7). cfg0 (det, array 0-3) launches when det training finishes (best.pt). Together with
 permode_boston_r1 (oracle+random) -> full core: oracle/det/default-WTA/random vs ADR-058/059. sel deferred.
 det 8277524 at epoch ~42 minADE 0.126; per-mode 8278183 running (closed-loop, few h).
+
+## ADR-068: Boston closed-loop eval validated (sane per-mode CLS)
+Date: 2026-07-10. Status: monitoring. Step 4.
+Partial per-mode Boston CLS on Val14 sub300: mode means 0.625-0.638, all in [0,1], mode0 complete n=300.
+Confirms the Boston-trained WTA closed-loop eval produces sane numbers (not garbage). Early/non-conclusive:
+Boston per-mode means cluster ~0.63, tighter+lower than mini per-mode [0.657,0.796] (ADR-058); the oracle
+(best-of-6) + det + default-WTA decide the gate and are still running. det 8277524 epoch 63 minADE 0.094;
+modes 4,5 + default-WTA (8279921) still in closed-loop. det zoo (array 0-3) launches on final best.pt.
