@@ -1550,3 +1550,31 @@ gate reproduces or fails from the magnitudes alone. Then surface to Parv the gat
 full retrain should use MATCHED recipe+budget for det+wta+selector (the clean design), given (i) the
 mechanism reproduces cleanly but (ii) the raw Boston magnitudes are weak+confounded. n=300, single seed,
 Boston-only -> provisional. Consolidates ADR-070/071.
+
+
+## ADR-073: Partial oracle-vs-det = -0.055 (det BEATS oracle) -- confound B decisive; matched-budget WTA launched
+Date: 2026-07-11. Status: in-progress. Selection-bottleneck study, step 4, Boston de-risk.
+
+Partial (det zoo shard 2 done, n=75 of 300; all 6 modes + det + default-WTA on those tokens):
+  ORACLE (best-of-6) 0.695   det 0.750   default-WTA 0.665   RANDOM 0.641
+  oracle - det (LATENT VALUE)  -0.055   [mini ADR-058: +0.058]  -> det BEATS best-of-6 oracle
+  frac scenes some mode beats det  0.347   [mini 0.48]
+  det - random  +0.109  (det far stronger than the modes)
+
+READ (honest): on real Boston data the plain-WTA modes carry NO latent value over det -- the opposite
+sign to mini. BUT this is confound B (ADR-072) biting exactly as pre-registered: det got ~57x the WTA
+head's training budget (train_policy 150 ep, minADE 0.070) vs wta_derisk_train 4000 steps. det simply
+being a much better-optimized policy explains det >> the under-trained WTA modes. So -0.055 does NOT
+cleanly refute latent value; the plain-WTA de-risk is UNINTERPRETABLE on the primary claim.
+
+ACTION (evidence-justified, no longer speculative): launched a MATCHED-BUDGET WTA -- train_policy.py
+--head wta --n-modes 6 --goal route on f0_boston, 150 epochs, IDENTICAL trainer/optimizer/schedule as
+det (job 8285695, GPU). This removes confound B AND the recipe confound A (same trainer as det) in one
+shot. Then re-run per-mode eval with the matched WTA -> a FAIR oracle-vs-det. Both outcomes are clean
+findings: matched-oracle > det => latent value reproduces (earlier -0.055 was a budget artifact);
+matched-oracle <= det => latent value genuinely does not reproduce on real data (honest negative).
+
+Note: this extends the "scoped de-risk" by ~7h train + ~3h eval, but it is the only interpretable test
+of the primary claim and stays far cheaper than the full bos+pitt+singapore retrain. The plain-WTA n=300
+verdict (chained, 8283561) still completes as the confounded baseline. Mechanism (cl_corr r=0.071) is
+unaffected and still reproduces. n=75 partial, single seed, Boston -> provisional.
