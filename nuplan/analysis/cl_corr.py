@@ -34,14 +34,18 @@ def main():
     ap.add_argument("--shard-glob", default="/scratch/patodia.pa/av-policy-lab/features/f0_v3/task_*/scene_shard_*.pt")
     ap.add_argument("--n-modes", type=int, default=6)
     ap.add_argument("--min-tokens", type=int, default=300, help="early-stop once this many matched (corr needs few)")
+    ap.add_argument("--cls-glob", default="rl_h1*",
+                    help="glob (under sim_results/) of the closed-loop eval dirs that supply the "
+                         "per-token deployed CLS. Default rl_h1* (mini). Boston de-risk: "
+                         "eval/boston_zoo_r1/wta_route_shard* (default-WTA = deployed top-scored mode).")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # closed-loop CLS per token (union of all rl_h1* eval shards)
+    # closed-loop CLS per token (union of all matching eval shards)
     SC = "/scratch/patodia.pa/av-policy-lab"
     cls = {}
-    for d_ in sorted(glob.glob(f"{SC}/sim_results/rl_h1*")):
+    for d_ in sorted(glob.glob(f"{SC}/sim_results/{a.cls_glob}")):
         agg = latest_aggregator(d_)
         if agg: cls.update(read_cell_metric(agg, "score")[0])
     print("closed-loop CLS tokens:", len(cls), flush=True)
