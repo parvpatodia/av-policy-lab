@@ -1871,3 +1871,31 @@ NEP-50 dtype-promotion or copy-semantics diff, or an np API whose default change
 features/scene_features.py to be numpy-version-agnostic (explicit dtypes/casts) OR pin numpy; RE-VERIFY our
 det recovers ~0.799 inside the his-fork env on the 5 tokens BEFORE scaling. SMART scaling REMAINS BLOCKED.
 Revert the debug dump after. N=5, provisional.
+
+## ADR-085: feature-extraction corruption REFUTED (iter-0 features byte-identical); divergence is rollout-level
+Date: 2026-07-25. Status: corrects ADR-084; env-vs-harness isolation running. Phase 2.
+
+SAME-TOKEN FEATURE DIFF (token 33a911fcc99150b1, iteration 0, our det planner, IDM, device=cpu; dumped
+LIVE in-sim under both envs -- feats_nuplan.npz [nuplan] vs feats_smart2.npz [nuplan_smart], BOTH pinned to
+33a911 after fixing an earlier token-mismatch where his-fork limit=1 grabbed 00301):
+  ego_pose: identical. ego/agents/agent_mask/map_polylines/map_mask/crosswalks/crosswalk_mask/
+  route_polyline/route_mask/traffic_lights: ALL max-abs-diff = 0.0 (byte-identical). pred: max diff 4.8e-6.
+=> SceneFeatureExtractor is NOT corrupted by numpy 1.23 vs 2.0; the model forward is clean (ADR-084 probe).
+ADR-084's "corruption in the live feature path / numpy" conclusion is REFUTED at iteration 0.
+
+REFRAME: the 0.799 (our devkit+nuplan, run_cells.py) vs 0.365 (his fork+nuplan_smart, run_simulation.py)
+gap on the 5 tokens conflates TWO uncontrolled variables: (i) ENV (numpy2.0/torch2.8 vs numpy1.23/torch2.1),
+(ii) HARNESS (our run_cells.py sim setup vs his hydra +simulation=closed_loop_reactive_agents). Since iter-0
+feats+pred are identical, the divergence is ROLLOUT-level -- it emerges over the 150-step closed loop
+(controller/tracker + IDM agents + re-extraction compounding) and/or from a sim-config difference between
+the two harnesses. Maneuver-dependence (stationary 1.0==1.0, pickup_drop 0.92~0.82, but the 3 dynamic
+tokens 0.55-0.78 -> 0.0) points at ego-tracking (LQR/kinematic-bicycle) sensitivity.
+
+DECISIVE ISOLATION (launched): run OUR run_cells.py harness on the 5 pinned tokens under the nuplan_smart
+env (holds harness+config+devkit+planner constant, varies ONLY env). Anchors: run_cells@nuplan=0.799,
+his_run_simulation@nuplan_smart=0.365.
+  run_cells@nuplan_smart ~0.365 => ENV (numpy) is the cause; compounding in controller/agents over rollout.
+  run_cells@nuplan_smart ~0.799 => env exonerated; his HARNESS/sim-config is the cause -> diff run_cells sim
+                                   setup vs closed_loop_reactive_agents (duration, planner freq, controller).
+SMART scaling REMAINS BLOCKED until our det recovers ~0.799 inside the his-fork run. Debug dump still in
+planner (backup policy_planner.py.bak); revert after root cause fixed. N=5, provisional.
