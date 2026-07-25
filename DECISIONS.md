@@ -1899,3 +1899,44 @@ his_run_simulation@nuplan_smart=0.365.
                                    setup vs closed_loop_reactive_agents (duration, planner freq, controller).
 SMART scaling REMAINS BLOCKED until our det recovers ~0.799 inside the his-fork run. Debug dump still in
 planner (backup policy_planner.py.bak); revert after root cause fixed. N=5, provisional.
+
+## ADR-086: ROOT CAUSE = non-canonical CLS aggregator in run_cells (no hard multipliers). NOT a bug in the SMART integration.
+Date: 2026-07-25. Status: DECISIVE. Corrects the whole ADR-081..085 arc AND flags a prior-results issue. Phase 2.
+
+THE FINDING. The 0.799 (our run_cells) vs 0.365 (his run_simulation) gap on the 5 tokens is ENTIRELY a
+metric-aggregator difference; the ego drives IDENTICALLY (same two_stage_controller + idm observation +
+policy_planner; iter-0 feats+pred byte-identical, ADR-085). PROOF on token 33a911: drivable_area_compliance
+sub-metric = 0.0 in BOTH harnesses (ego really does leave the drivable area on high_lat_acc), yet final CLS =
+0.547 under run_cells but 0.0 under the his preset.
+  - run_cells aggregator = default_weighted_average (default_simulation default): multiple_metrics: NULL
+    -> NO hard multipliers; CLS = weighted avg of {ego_progress_along_expert_route(5), time_to_collision(5),
+       speed_limit(4), comfort(2)} only.
+  - canonical (his closed_loop_reactive_agents preset) = closed_loop_reactive_agents_weighted_average:
+    multiple_metrics = [no_ego_at_fault_collisions, drivable_area_compliance, ego_is_making_progress,
+       driving_direction_compliance] -> HARD MULTIPLIERS (score x 0 on violation). This is the standard
+       nuPlan/PDM closed-loop score used by the leaderboard AND Steffen's SMART pipeline.
+
+WHAT THIS RESOLVES. There is NO planner/env/devkit/torch/numpy/device bug. The full elimination chain
+(ADR-081 weak-planner? no; -082 device/env? env; -083 device ruled out; -084 torch ruled out, "numpy feature"
+hypothesized; -085 features byte-identical, hypothesis refuted, env exonerated via run_cells@nuplan_smart=0.775)
+was all necessary to arrive here honestly. Our det planner runs correctly in his fork. 0.365 is the CORRECT
+canonical CLS for our det under IDM on those 5 tokens; 0.799 was a lenient-metric artifact.
+
+PRIOR-RESULTS IMPLICATION (must flag to Parv). EVERY CLS number produced via run_cells -- ADR-075 IDM Boston
+de-risk (oracle 0.828 > det 0.737, +0.091; selection ~random; cl_corr 0.071), the val14_sub300 per-mode/zoo/
+selection study (ADR-058/059 and the whole mode-selection-bottleneck line), the mini results -- used
+default_weighted_average (multiple_metrics=null) and therefore OMIT the four PDM hard multipliers. They are
+NOT canonical closed-loop scores; they are inflated (no drivable-area / collision / making-progress /
+direction gating). The four multipliers are per-scenario 0/1(/0.5) gates that can flip which mode is best
+(oracle-over-modes) and whether det survives, so the QUALITATIVE selection-bottleneck conclusions (oracle-det
+gap, cl_corr, latent value) are NOT guaranteed under the canonical CLS and must be re-computed.
+
+FORWARD PLAN (unblocks Phase 2 cleanly, unifies metric with SMART):
+  1. Switch our eval to the canonical aggregator: run_cells override metric_aggregator=
+     closed_loop_reactive_agents_weighted_average (reactive) / _nonreactive_ (CLS-NR). VERIFY it reproduces
+     0.365 on the 5 tokens (matches his-fork canonical) before scaling.
+  2. RE-BASELINE the IDM foundation under canonical CLS: per-mode(WTA_MODE_INDEX 0..5)+det+default-WTA on
+     val14_sub300 -> corrected oracle/det/selection-gap/cl_corr.
+  3. SMART study under the SAME canonical CLS (his closed_loop_smart_reactive_agents) -> IDM-canonical vs
+     SMART-canonical, directly comparable, both field-standard.
+Debug dump in serving/policy_planner.py REVERTED (restored from policy_planner.py.bak). N=5, provisional.
