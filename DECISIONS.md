@@ -1578,3 +1578,49 @@ Note: this extends the "scoped de-risk" by ~7h train + ~3h eval, but it is the o
 of the primary claim and stays far cheaper than the full bos+pitt+singapore retrain. The plain-WTA n=300
 verdict (chained, 8283561) still completes as the confounded baseline. Mechanism (cl_corr r=0.071) is
 unaffected and still reproduces. n=75 partial, single seed, Boston -> provisional.
+
+
+## ADR-074: Steffen's code released -- SMART reactive agents integration understood; Phase 2 plan
+Date: 2026-07-24. Status: plan. Selection-bottleneck study, Phase 2 (SMART realism axis) UNBLOCKED.
+
+Repo: github.com/boschresearch/interactive-closed-loop (AGPL-3.0). Paper: Hagedorn, Distelzweig,
+Condurache, "When Planners Meet Reality: How Learned, Reactive Traffic Agents Shift nuPlan Benchmarks",
+ICRA 2026, arXiv:2510.14677. It is a FORK of nuplan-devkit's `planning` module (setup: rm -rf
+nuplan/planning && git clone this repo AS planning) + the SMART repo (rainmaker22/SMART) + a nuPlan-
+trained SMART checkpoint (planning/checkpoint/epoch=07_1180.ckpt, token_size 2048, 11 hist / 80 fut @0.1s).
+
+MECHANICS (verified from code):
+- SMARTAgents(AbstractMLAgents) is a standard nuPlan OBSERVATION (drop-in for IDMAgents). Every 5 frames
+  (0.5s) it runs SMART inference (match_token_map -> sample_pt_pred -> inference -> pred_traj/pred_head),
+  then moves each non-ego agent to the predicted pose (velocity from finite diff). Ego is excluded
+  (planner-controlled). SMARTWrapper wraps `smart.model.smart.SMART`; SMARTFeatureBuilder tokenizes the
+  nuPlan scene (token_size 2048).
+- closed_loop_smart_reactive_agents.yaml overrides ONLY /observation: smart_agents; it KEEPS
+  two_stage_controller, simulation_closed_loop_reactive_agents metrics, and the reactive weighted-average
+  aggregator -- IDENTICAL to the standard IDM closed_loop_reactive_agents. => CLS under SMART is directly
+  comparable to our entire IDM-based study (ADR-055..073). The ego planner is orthogonal/overridable.
+
+IMPACT ON OUR WORK (this is the differentiator that lifts us off the workshop ceiling):
+- Our result to date is ALL under IDM: modes carry latent value (Boston matched oracle 0.828 > det 0.737,
+  +0.091; ADR-073), feedforward selection fails to realize it (imitation-score < random; cl_corr r~0.07).
+- Steffen's thesis: IDM misranks planners; SMART shifts rankings. So the novel, non-overlapping question
+  our work can now answer: DOES THE MODE-SELECTION BOTTLENECK PERSIST OR CHANGE UNDER REALISTIC (SMART)
+  REACTIVE AGENTS? Both outcomes publish: (a) persists -> selection failure is robust, not an IDM artifact
+  (strengthens us + extends him); (b) shifts -> agent realism modulates the selection landscape (a new
+  finding built directly on his contribution). Early-mover: SMART-in-nuPlan just released.
+
+PLAN (Phase 2):
+  1. Stand up on cluster: nuplan-devkit + SMART repo + this fork AS nuplan/planning + `nuplan_smart` conda
+     env. Smoke-test closed_loop_smart_reactive_agents on 1 scenario (checkpoint loads, agents roll out).
+  2. Drop OUR policy_planner (det/wta/selector) into his fork as a planner config (it's a standard
+     AbstractPlanner); load our matched-budget Boston checkpoints.
+  3. Re-run the selection study (per-mode oracle 0..5, det, default-WTA, selector, cl_corr) under
+     observation=smart_agents on the SAME Val14 sub300, matched-budget ckpts -> directly comparable
+     IDM-vs-SMART table.
+  4. Compare: oracle-det, oracle-vs-selection gap, cl_corr under SMART vs IDM. Interpret invariance/shift.
+RISKS: SMART rollout slower than IDM (autoregressive transformer / 0.5s) -> costlier eval; env/devkit
+version pinning; AGPL-3.0 copyleft attaches to any derived code we release (our Phase-2 code should be
+AGPL if distributed). Non-blocking for research.
+DECISION PENDING (Parv): commit to the ~multi-day env build + planner integration now (recommended), vs
+first reproduce his 1-scenario smoke only. Boston IDM de-risk stands independently (matched latent value
+reproduced). Push remains MANUAL (public repo).
