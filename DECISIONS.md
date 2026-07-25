@@ -1776,3 +1776,38 @@ devkit (env `nuplan`, run_cells.py, tuplan_garage on PYTHONPATH) under IDM on th
 
 Files added: nuplan/slurm/skew_control_idm.sbatch. Gate ADR-074/076 unchanged; scaling still BLOCKED on
 this control. Senior-AV rigor: N=5, single seed, provisional.
+
+## ADR-082: skew ROOT-CAUSE narrowed -- NOT devkit source; it is device/env in OUR integration harness
+Date: 2026-07-25. Status: root-cause isolation running (job 8718651). Corrects ADR-081 framing. Phase 2.
+
+SKEW-CONTROL RESULT (job 8718009, our det planner, OUR devkit `nuplan` env, IDM, same 5 pinned tokens):
+  stationary 1.000 | pickup_drop 0.919 | high_lat_acc 0.547 | low_mag_speed 0.750 | start_left_turn 0.776
+  final 0.799  vs his-fork 0.365 (job 8717075).  The 3 his-fork zeros score 0.55-0.78 in our devkit.
+=> our planner is NOT weak; it drives these fine. Something in the his-fork RUN corrupts it. Corruption
+   scales with maneuvering (stationary identical, turns -> off-road) -- a coordinate/numerics signature.
+
+CORRECTION TO ADR-081 ("devkit-version-skew"): WRONG on the mechanism. Both devkits are the SAME commit
+e924167 (nuplan-devkit-v1.2-13). diff of ALL .py under simulation/ + actor_state/ + geometry/: the
+IDM-relevant code path (trajectory construction, two_stage_controller, LQR tracker, kinematic_bicycle
+motion model, ego_state, geometry) is BYTE-IDENTICAL. His fork only ADDS files (observation/smart_agents.py,
+efficient_ml_planner.py, SMART feature builders, script/*smart*) + edits observation_builder/training_builder
+to register them -- NONE used in the IDM run. So his fork does NOT corrupt the IDM path.
+
+Both runs also use the SAME planner class serving.policy_planner.PolicyPlanner (run_cells.py line 70 selects
+planner=policy_planner too) and the SAME det path (compute_planner_trajectory is deterministic: RNG only in
+the diffusion branch). So the ONLY remaining variables between control(0.799) and his-fork(0.365) are:
+  (1) DEVICE: our repo config/planner/policy_planner.yaml device=cpu (control) vs the his-fork yaml I wrote
+      device=cuda. (num_samples/ddim_steps unused for det.)
+  (2) ENV: `nuplan` = torch 2.8.0+cpu / numpy 2.0.2 ; `nuplan_smart` = torch 2.1.0+cu121 / numpy 1.23.4.
+      (scipy 1.13.1 + shapely 2.0.7 identical -> map/geometry consistent.)
+det path is deterministic so cpu/cuda should be ~numerically equal; a CATEGORICAL off-road failure from
+device alone would be surprising -> env(torch 2.1 vs 2.8 / numpy 1.23 vs 2.0) is at least as likely.
+
+ISOLATION LAUNCHED (job 8718651, policy_idm_cpu.sbatch): our det planner in HIS fork + nuplan_smart env +
+IDM + SAME 5 tokens but planner.policy_planner.device=cpu. Anchors: our-env+cpu=0.799, his-env+cuda=0.365.
+  his-env+cpu ~0.799  => failure needs cuda => DEVICE bug in our model/feature code on GPU.
+  his-env+cpu ~0.365  => ENV (torch 2.1/numpy 1.23) corrupts our model even on cpu => must reconcile torch
+                         (our validated stack ~torch2.8/numpy2.0 vs SMART's torch2.1) before any SMART number.
+  intermediate         => both contribute.
+Either way: SMART scaling REMAINS BLOCKED until our det planner recovers ~0.799 inside the his-fork run
+environment on these 5 tokens. Files added: nuplan/slurm/policy_idm_cpu.sbatch. N=5, provisional.
