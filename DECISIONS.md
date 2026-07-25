@@ -1718,3 +1718,14 @@ nuplan-v1.1_val.zip 91G), mini data/ (14G), AND critically our matched Boston ck
 re-download. train_stage NOT needed (f0_boston already extracted); test_stage not needed for Phase 2.
 OPERATIONAL RISK: extracted val DBs will re-purge in ~2wk; keep the SMART eval runs close together, or
 touch/re-extract as needed. Next: after 8696826, re-run smoke 8696397-style on the restored val DBs.
+
+## ADR-080: SMART smoke PASSED -- Phase 2 integration VALIDATED
+Date: 2026-07-25. Status: milestone. Phase 2.
+closed_loop_smart_reactive_agents ran END-TO-END on our val DBs (job 8699608, rc=0): SMART checkpoint
+epoch=07_1180.ckpt loaded, SMART reactive agents rolled out (sim duration 8:10 for 1 scenario), CLS
+computed + aggregator parquet written (closed_loop_reactive_agents_weighted_average). simple_planner
+scored 0.0 (expected -- trivial dummy planner; smoke only validates the pipeline). Integration required 6
+fixes beyond his README (ADR-077/078/079 + opencv 4.10.0.84 + checkpoint cwd + easydict) + val re-extract
+after scratch purge. PERF NOTE: ~8 min/scenario under SMART (vs ~2 min IDM) -> sub300 x 8 configs is
+~heavy; will need wide array parallelization or a smaller subset for the selection study. NEXT: register
+OUR PolicyPlanner + run 1 Val14 token under observation=smart_agents (matched Boston det ckpt).
