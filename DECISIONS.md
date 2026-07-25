@@ -1980,3 +1980,36 @@ non-canonical; the canonical numbers above supersede them. (b) The SMART-vs-IDM 
 canonical CLS (which it now will -- his SMART/IDM presets already do). (c) Next: cl_corr under canonical
 CLS; then SMART per-mode+det+default-WTA (canonical) on val14_sub300 -> does the (now-negative) selection
 picture persist or shift under realistic SMART agents. Files: nuplan/analysis/canonical_reaggregate.py.
+
+## ADR-088: det IDM-vs-SMART under CANONICAL CLS -- realistic SMART agents do NOT significantly change the det planner's score
+Date: 2026-07-25. Status: clean data point; provisional (n=60, single seed). Phase 2.
+
+SETUP. OUR det planner as ego under his closed_loop_smart_reactive_agents (SMART learned agents; canonical
+CLS) vs under IDM (canonical), on the SAME first-60 tokens of val14_sub300. SMART side = job 8720832
+(8-shard GPU array, all COMPLETE). IDM side = canonical_reaggregate over the existing boston_zoo_r1/
+det_route runs restricted to the 60 tokens (NO new IDM compute; ADR-086/087 method).
+
+RESULT (paired, n=60):
+  det-IDM   canonical mean 0.1823  (frac>0 0.20)
+  det-SMART canonical mean 0.1243  (frac>0 0.13)
+  paired delta (SMART-IDM) mean -0.0580 +/- 0.0403 (1se), median 0.0000, t = -1.44 (NOT significant)
+  per-scenario: 50/60 TIE (mostly both hard-zero or identical), 5 SMART>IDM, 5 SMART<IDM.
+
+INTERPRETATION (honest). Swapping IDM for realistic SMART agents does NOT significantly change the ego det
+planner's canonical closed-loop score on this subset. Most scenarios (50/60) score identically under both
+agent models -- the det planner's CLS is dominated by its OWN hard-constraint violations (off-road /
+collision / making-progress), which fire regardless of whether the surrounding agents are IDM or SMART.
+The reactive-agent model is NOT the bottleneck; the planner's constraint-satisfaction is.
+
+CAVEATS. (1) n=60, single seed, first-60-of-val14_sub300 subset; the -0.058 direction is suggestive but
+t=-1.44 does not clear significance. (2) Limited headroom: det is weak under canonical CLS (0.18 IDM),
+frequently hard-zeroing, so an agent-model effect has little room to show; a STRONGER planner might be more
+SMART-sensitive. (3) Boston-trained det on Val14 (mild distribution shift).
+
+RELATION TO GOAL. For the det planner the answer to "does the closed-loop picture shift under realistic
+SMART vs IDM" is: NO significant shift (n=60). The mode-SELECTION half (oracle-over-modes / default-WTA
+under SMART) is deferred: it needs the per-mode SMART sweep, which is worth running ONLY after a
+matched-budget WTA retrain (current WTA is 4000-step, budget-confounded ~57x vs det -> ADR-087 latent
+value -0.127 is confounded). RECOMMEND to Parv: train a matched-budget WTA (match det's ~228k steps /
+~150ep, same recipe) before the headline SMART per-mode selection study; the det IDM-vs-SMART point above
+is clean and publishable now. Files: nuplan/slurm/smart_det_canon.sbatch.
