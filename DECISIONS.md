@@ -1693,3 +1693,16 @@ nuplan-devkit/requirements.txt into nuplan_smart (job 8694572, detached compute)
 urllib3 1.26.20 after. hydra 1.1.0rc1 from that req is also REQUIRED for nuplan configs. Next: re-verify
 imports (shapely+geopandas+hydra+torch+pyg+smart), then SMOKE closed_loop_smart_reactive_agents on 1
 Val14 token. Stack /home/patodia.pa/smart-stack; PYTHONPATH=nuplan-devkit:SMART; NUPLAN_DATA_ROOT=val_stage.
+
+## ADR-078: nuplan_smart env IMPORT-CLEAN; SMART smoke launched
+Date: 2026-07-25. Status: in-progress. Phase 2.
+Env now imports cleanly: core (shapely/geopandas/hydra 1.1.0rc1/torch 2.1.0+cu121/pyg/pl) + his SMARTAgents
+observation + smart.model.smart.SMART. Fixes applied beyond his README: (a) installed base nuplan-devkit
+deps filtered to drop jupyter/testbook/dev lines that pulled nbclient>=py3.10 (ADR-077); (b) downgraded
+tensorboard 2.21->2.11.2 to fix protobuf 3.20.3 runtime_version ImportError (tensorboard only via PL
+logger, not the sim); (c) STUB for waymo_open_dataset.protos.sim_agents_submission_pb2 at
+smart-stack/waymo_stub -- SMART imports it ONLY in joint_scene_from_states (Waymo submission), NOT on the
+nuPlan inference path; avoids pulling TF 2.12. PYTHONPATH = nuplan-devkit:SMART:waymo_stub.
+SMOKE launched (job 8696046): run_simulation.py +simulation=closed_loop_smart_reactive_agents
+planner=simple_planner scenario_builder=nuplan db_files=val_stage/data/cache/val scenario_filter=val14_split
+limit 1, GPU. Verifies checkpoint epoch=07_1180.ckpt loads + SMART agents roll out on our val DBs.
