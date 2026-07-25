@@ -1653,3 +1653,33 @@ CONCLUSION: the mode-selection bottleneck REPRODUCES on real nuPlan training dat
 solid IDM foundation for Phase 2 (SMART realism axis, ADR-074). Provisional caveats: n=300 subset, single
 seed, Boston only; the full bos+pitt+singapore + multi-seed is the paper-grade version. Gate: PASSED on
 real data.
+
+
+## ADR-076: Phase 2 integration recipe -- plug our PolicyPlanner into Steffen's SMART sim
+Date: 2026-07-24. Status: recipe (env building, job 8693723). Selection-bottleneck Phase 2.
+
+Verified both sides:
+- OUR PolicyPlanner (av-policy-lab/nuplan/serving/policy_planner.py) is a std AbstractPlanner. Deps:
+  stock nuplan.common/.planning.simulation APIs (his fork provides) + OUR top-level pkgs
+  features.scene_features, models.{policy_heads,scene_encoder,samplers,f0_dataset}. Builds features LIVE
+  at sim time (no cache). Loads our matched-budget Boston ckpts (det/wta) via encoder+head state_dict.
+- HIS fork registers planners via a yaml with `_target_: <class>` (+ params), e.g. ml_planner.yaml,
+  simple_planner.yaml, smart_planner.yaml, under
+  smart-stack/nuplan-devkit/nuplan/planning/script/config/simulation/planner/.
+
+INTEGRATION STEPS (once nuplan_smart env is up):
+  1. SMOKE his stack alone (no our-code): run_simulation.py +simulation=closed_loop_smart_reactive_agents
+     planner=simple_planner scenario_filter=<1 Val14 token> scenario_builder=nuplan, NUPLAN_DATA_ROOT=our
+     val_stage. Confirms checkpoint loads + SMART agents roll out on OUR data.
+  2. Register our planner: PYTHONPATH += /home/patodia.pa/av-policy-lab/nuplan (gives features/, models/,
+     serving/) + SMART_ROOT. Add policy_planner.yaml (_target_: serving.policy_planner.PolicyPlanner,
+     params head/goal/ckpt). Run his sim with planner=policy_planner observation=smart_agents on 1 token.
+  3. Scale: replicate our per-mode (WTA_MODE_INDEX 0..5) + det + default-WTA under observation=smart_agents
+     on Val14 sub300, SAME matched Boston ckpts -> IDM-vs-SMART comparable table. + cl_corr under SMART.
+
+RISKS: (a) devkit VERSION skew -- his cloned nuplan-devkit may differ from the one our PolicyPlanner /
+SceneFeatureExtractor were written against; AbstractPlanner/DetectionsTracks/scenario API drift could
+break our planner (find at step 2). (b) torch 2.1.0 (his env) vs 2.4.1 (our training) loading our
+state_dicts -- low risk. (c) WTA_MODE_INDEX override path must exist in the planner code we deploy here.
+(d) SMART rollout slow -> keep to sub300. Reference IDM result: ADR-075 (oracle 0.828 > det 0.737 +0.091,
+selection ~random, cl_corr 0.071).
