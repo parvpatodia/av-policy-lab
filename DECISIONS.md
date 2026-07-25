@@ -1706,3 +1706,15 @@ nuPlan inference path; avoids pulling TF 2.12. PYTHONPATH = nuplan-devkit:SMART:
 SMOKE launched (job 8696046): run_simulation.py +simulation=closed_loop_smart_reactive_agents
 planner=simple_planner scenario_builder=nuplan db_files=val_stage/data/cache/val scenario_filter=val14_split
 limit 1, GPU. Verifies checkpoint epoch=07_1180.ckpt loads + SMART agents roll out on our val DBs.
+
+## ADR-079: scratch PURGED extracted stage DBs; re-extracting val (smoke blocker)
+Date: 2026-07-25. Status: fix. Phase 2.
+SMART smoke got past ALL imports (env fixes worked) and failed only at scenario_builder: the val DB dir
+was EMPTY. Cause: HPC scratch auto-purged the extracted stage DBs -- val_stage/test_stage/train_stage
+are all 0 bytes (extracted Jul 10-13; purge ~2wk). SURVIVING: the 216G downloads/ zips (incl
+nuplan-v1.1_val.zip 91G), mini data/ (14G), AND critically our matched Boston ckpts
+(runs/boston_derisk/{det_route_seed0,wta_route_seed0}/best.pt + wta_boston_s4000.pt) and features/f0_boston
+(11G) -- Phase 2 NOT set back. Fix: re-extract val zip (job 8696826) -> val_stage/data/cache/val; no
+re-download. train_stage NOT needed (f0_boston already extracted); test_stage not needed for Phase 2.
+OPERATIONAL RISK: extracted val DBs will re-purge in ~2wk; keep the SMART eval runs close together, or
+touch/re-extract as needed. Next: after 8696826, re-run smoke 8696397-style on the restored val DBs.
