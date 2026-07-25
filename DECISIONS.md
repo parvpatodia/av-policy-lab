@@ -1841,3 +1841,33 @@ attention masking) -> bisect encoder vs head. output identical => feature/numpy 
 promotion vs 1.23) upstream. Then FIX: cheapest viable = pin/patch the offending op or align one package
 in a SMART-compatible env; verify our det recovers ~0.799 INSIDE the his-fork run env on the 5 tokens
 BEFORE scaling. SMART scaling REMAINS BLOCKED. N=5, provisional.
+
+## ADR-084: torch RULED OUT (model forward version-stable); corruption is the LIVE feature path (numpy)
+Date: 2026-07-25. Status: model forward cleared; live-feature dump running (job 8719136). Phase 2.
+
+FORWARD PROBE (forward_probe.py, encoder+head on ONE pre-extracted f0 sample -- BYPASSES
+SceneFeatureExtractor -- same input tensor loaded from disk in both envs):
+                    nuplan(torch2.8/np2.0)   nuplan_smart(torch2.1/np1.23)
+  encoder_mem_sig       -34.436322               -34.436321
+  head_traj_sig          65.059318                65.059317
+  pred mean/std       13.553024/23.337587       13.553024/23.337587
+  pred_first3           IDENTICAL                 IDENTICAL (to 4+ decimals)
+Sigs differ only in the last ULP (~1e-6); pred values identical to sub-mm. (md5 differs only because it
+hashes float32 bytes and the last bit flips.) => the MODEL FORWARD (ckpt load + SceneEncoder + Det head +
+unscale) is version-STABLE across torch 2.1 vs 2.8. A ~1e-4 m trajectory delta cannot turn 0.799 into
+off-road/collision. TORCH IS NOT THE CAUSE.
+
+=> By elimination the corruption is in the LIVE path the probe bypasses: SceneFeatureExtractor
+(features/scene_features.py) run under numpy 1.23.4 (nuplan_smart) vs 2.0.2 (nuplan). Our extractor was
+written/validated under numpy 2.0; under 1.23 it must produce different features on dynamic scenarios ->
+wrong planned trajectory -> off-road. (devkit source is byte-identical; scipy/shapely identical; the only
+remaining env delta on the live path is numpy.)
+
+LOCALIZER LAUNCHED (job 8719136, dump_feats.sbatch): env-gated one-shot dump (planner patched, backup at
+/home/patodia.pa/policy_planner.py.bak) of the LIVE feature batch for token 33a911fcc99150b1 (high_lat_acc,
+index 0) under BOTH envs (our nuplan via run_cells.py; his fork via run_simulation.py, both cpu/IDM) ->
+feats_nuplan.npz vs feats_smart.npz. Diff per ENCODER_KEY to find the numpy-version-sensitive op (likely a
+NEP-50 dtype-promotion or copy-semantics diff, or an np API whose default changed). Then patch
+features/scene_features.py to be numpy-version-agnostic (explicit dtypes/casts) OR pin numpy; RE-VERIFY our
+det recovers ~0.799 inside the his-fork env on the 5 tokens BEFORE scaling. SMART scaling REMAINS BLOCKED.
+Revert the debug dump after. N=5, provisional.
