@@ -1624,3 +1624,32 @@ AGPL if distributed). Non-blocking for research.
 DECISION PENDING (Parv): commit to the ~multi-day env build + planner integration now (recommended), vs
 first reproduce his 1-scenario smoke only. Boston IDM de-risk stands independently (matched latent value
 reproduced). Push remains MANUAL (public repo).
+
+
+## ADR-075: IDM Boston de-risk COMPLETE (matched-consistent) -- gate reproduces on real data
+Date: 2026-07-24. Status: result. Selection-bottleneck study, step 3 (Boston de-risk), FINAL matched.
+
+Final matched-consistent verdict on real Boston data, Val14 sub300, n=300 (matched-budget WTA head for
+oracle/random/default-WTA; det = train_policy 150ep; all matched trainer/budget):
+  per-mode means {0:0.756, 1:0.750, 2:0.770, 3:0.789, 4:0.796, 5:0.777}
+  oracle 0.8276   det 0.7365   default-WTA 0.7771   random 0.7731
+  latent value  (oracle - det)              +0.0911   [mini +0.058]
+  unrealized    (oracle - default-WTA)      +0.0505
+  selection     (default-WTA - random)      +0.0041   ~= random (NOT below)
+  frac scenes some mode beats det            0.590     [mini 0.48]
+  mechanism cl_corr pearson(open-loop, CLS)  0.071     [mini 0.11]
+
+HONEST READING (supersedes the plain-WTA confounded ADR-070/073 for the final claim):
+- LATENT VALUE reproduces strongly on real data and is LARGER than mini (+0.091 vs +0.058); 59% of
+  scenes contain a mode beating det; even random-mode (0.773) beats det (0.737). The multimodality
+  deficit is NOT a modes problem on real data.
+- SELECTION is the bottleneck: the imitation-score head selection (0.777) is statistically ~random
+  (+0.004) and leaves +0.051 of oracle headroom unrealized. The mini "worse than random" (-0.025) was an
+  undertraining artifact; the well-trained matched head is simply UNINFORMATIVE for closed-loop selection
+  -- a cleaner, more defensible claim, consistent with cl_corr r=0.071 (open-loop ~orthogonal to CLS).
+- The earlier "det beats oracle" (-0.059) was purely the ~57x budget confound (ADR-072/073), now removed.
+
+CONCLUSION: the mode-selection bottleneck REPRODUCES on real nuPlan training data under IDM. This is the
+solid IDM foundation for Phase 2 (SMART realism axis, ADR-074). Provisional caveats: n=300 subset, single
+seed, Boston only; the full bos+pitt+singapore + multi-seed is the paper-grade version. Gate: PASSED on
+real data.
