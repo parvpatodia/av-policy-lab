@@ -1811,3 +1811,33 @@ IDM + SAME 5 tokens but planner.policy_planner.device=cpu. Anchors: our-env+cpu=
   intermediate         => both contribute.
 Either way: SMART scaling REMAINS BLOCKED until our det planner recovers ~0.799 inside the his-fork run
 environment on these 5 tokens. Files added: nuplan/slurm/policy_idm_cpu.sbatch. N=5, provisional.
+
+## ADR-083: DEVICE ruled out -- the SMART-integration corruption is the ENV (torch/numpy), not cuda
+Date: 2026-07-25. Status: root cause = env; torch-vs-numpy localization next. Phase 2.
+
+ISOLATION (job 8718651, our det planner in HIS fork + nuplan_smart env + IDM + same 5 pinned tokens, but
+device=cpu):
+  scenario         HISenv+CPU   OURenv+CPU   HISenv+CUDA
+  stationary          1.000        1.000        1.000
+  pickup_drop         0.823        0.919        0.823
+  high_lat_acc        0.000        0.547        0.000
+  low_mag_speed       0.000        0.750        0.000
+  start_left_turn     0.000        0.776        0.000
+  final               0.365        0.799        0.365
+HISenv+CPU == HISenv+CUDA token-for-token (pickup_drop 0.823 in both; the 3 failures 0.000 in both).
+=> DEVICE (cuda vs cpu) is NOT the cause. The env fully determines the result.
+
+ROOT CAUSE: the `nuplan_smart` env corrupts our model. Delta vs the validated `nuplan` env:
+  nuplan (0.799):       torch 2.8.0+cpu, numpy 2.0.2
+  nuplan_smart (0.365): torch 2.1.0+cu121, numpy 1.23.4    (scipy 1.13.1, shapely 2.0.7 identical)
+Our model + the ADR-075 det=0.737 were validated under torch2.8/numpy2.0. Under torch2.1/numpy1.23 the
+det planner drives off-road/collides on dynamic scenarios (high_lat_acc, low_mag_speed, start_left_turn)
+while staying fine when stationary/benign -- corruption scales with maneuvering.
+
+NEXT (localize torch vs numpy, then fix): offline forward-probe -- load ONE fixed input batch (saved to
+disk, RandomState(0) at the real ENCODER_KEYS shapes/dtypes) + the det ckpt, run encoder+head forward
+under BOTH envs, diff the output trajectory. output differs => torch-version-sensitive op (likely SDPA/
+attention masking) -> bisect encoder vs head. output identical => feature/numpy path (numpy2 NEP-50 dtype
+promotion vs 1.23) upstream. Then FIX: cheapest viable = pin/patch the offending op or align one package
+in a SMART-compatible env; verify our det recovers ~0.799 INSIDE the his-fork run env on the 5 tokens
+BEFORE scaling. SMART scaling REMAINS BLOCKED. N=5, provisional.
