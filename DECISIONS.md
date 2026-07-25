@@ -1729,3 +1729,50 @@ fixes beyond his README (ADR-077/078/079 + opencv 4.10.0.84 + checkpoint cwd + e
 after scratch purge. PERF NOTE: ~8 min/scenario under SMART (vs ~2 min IDM) -> sub300 x 8 configs is
 ~heavy; will need wide array parallelization or a smaller subset for the selection study. NEXT: register
 OUR PolicyPlanner + run 1 Val14 token under observation=smart_agents (matched Boston det ckpt).
+
+## ADR-081: SMART-integration correctness gate is BIMODAL (not a clean pass); skew-control launched
+Date: 2026-07-25. Status: gate INCONCLUSIVE, discriminating control running (job 8718009). Phase 2.
+
+WHAT RAN. To decide whether the earlier SMART 0.0 (job 8699943, our det planner, 1 token, obs=smart_agents)
+was scenario-level or a silent break of our PolicyPlanner against Steffen's devkit clone, ran our det
+PolicyPlanner IN HIS FORK under IDM (closed_loop_reactive_agents) on 5 val14 tokens (job 8717075, COMPLETED
+rc=0, aggregator written).
+
+RESULT (his fork, IDM, our det, ckpt boston_derisk/det_route_seed0/best.pt):
+  stationary_in_traffic      1.000
+  traversing_pickup_dropoff  0.823
+  high_lateral_acceleration  0.000
+  low_magnitude_speed        0.000
+  starting_left_turn         0.000
+  final (mean of 5)          0.365
+Neither the "~0.74 works" nor the "~0.0 fully broken" branch. BIMODAL.
+
+SUB-METRIC DIAGNOSIS (which multiplier zeroed each): the zeros are COHERENT closed-loop driving failures,
+not crashes / garbage output:
+  high_lat_acc     : drivable_area=0, driving_direction=0, TTC=0  -> ego off-road + wrong-way
+  low_mag_speed    : no_ego_at_fault_collisions=0, TTC=0          -> ego at-fault collision (progress=1.0)
+  start_left_turn  : drivable_area=0, ego_is_making_progress=0    -> off-road + stalled mid-turn
+  stationary(1.0)  : all multipliers 1                            -> trivially correct
+  pickup_drop(0.82): all multipliers 1, progress 0.43             -> genuine good result
+Internally consistent (off-road co-occurs with wrong-direction + low progress; collision with TTC=0).
+=> imports / planner API wiring are FINE (it scores 0.82 on a real scenario). The failure is behavioral:
+ego drives off drivable area / collides on DYNAMIC scenarios (lateral accel, left turn), fine when
+stationary or on a benign traverse. That pattern is what a WEAK single-mode det planner looks like in
+closed loop -- consistent with the thesis -- BUT is ALSO exactly what a subtle devkit-version-skew
+(coordinate-frame / ego-state / trajectory-interpolation API drift between his clone and ours) would
+produce. N=5, and these are val14_split first-5 (mixed cities), NOT the Boston subset behind the
+ADR-075 det=0.737 reference, so 0.365-vs-0.737 is NOT a like-for-like comparison.
+
+HONEST VERDICT: cannot yet distinguish "genuinely weak planner" from "skew-corrupted trajectories."
+Gate is INCONCLUSIVE. Do NOT scale to SMART sub300 on this basis.
+
+DISCRIMINATING CONTROL (launched, job 8718009, skew_control_idm.sbatch): our det PolicyPlanner in OUR OWN
+devkit (env `nuplan`, run_cells.py, tuplan_garage on PYTHONPATH) under IDM on the EXACT SAME 5 tokens
+(pinned by token id) + same val DBs + reactive=1. Only variable = his-fork devkit vs ours.
+  - our devkit reproduces {0,0,0,1,0.82} (same failures)  => skew is NOT the cause; the zeros are genuine
+    planner behavior; his fork is faithful -> SAFE to scale SMART (zeros are real data).
+  - our devkit scores clean (~0.7+ on the 5)              => his fork corrupts our planner's trajectories
+    (version skew) -> must fix the skew before ANY SMART number is trustworthy.
+
+Files added: nuplan/slurm/skew_control_idm.sbatch. Gate ADR-074/076 unchanged; scaling still BLOCKED on
+this control. Senior-AV rigor: N=5, single seed, provisional.
