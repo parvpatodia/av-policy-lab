@@ -1683,3 +1683,13 @@ break our planner (find at step 2). (b) torch 2.1.0 (his env) vs 2.4.1 (our trai
 state_dicts -- low risk. (c) WTA_MODE_INDEX override path must exist in the planner code we deploy here.
 (d) SMART rollout slow -> keep to sub300. Reference IDM result: ADR-075 (oracle 0.828 > det 0.737 +0.091,
 selection ~random, cl_corr 0.071).
+
+## ADR-077: nuplan_smart env needed base devkit deps (his requirements.txt gap)
+Date: 2026-07-25. Status: setup. Phase 2.
+Env build (8693723) COMPLETED (torch 2.1.0+cu121, pyg 2.6.1, pl 1.3.8). But import check failed:
+ModuleNotFoundError shapely -- his planning/requirements.txt omits the BASE nuplan-devkit deps
+(shapely, geopandas, Fiona, rasterio, hydra-core==1.1.0rc1, rtree, SQLAlchemy...). Fix: install
+nuplan-devkit/requirements.txt into nuplan_smart (job 8694572, detached compute), re-pin numpy 1.23.4 +
+urllib3 1.26.20 after. hydra 1.1.0rc1 from that req is also REQUIRED for nuplan configs. Next: re-verify
+imports (shapely+geopandas+hydra+torch+pyg+smart), then SMOKE closed_loop_smart_reactive_agents on 1
+Val14 token. Stack /home/patodia.pa/smart-stack; PYTHONPATH=nuplan-devkit:SMART; NUPLAN_DATA_ROOT=val_stage.
