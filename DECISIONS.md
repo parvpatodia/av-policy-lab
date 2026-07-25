@@ -1940,3 +1940,43 @@ FORWARD PLAN (unblocks Phase 2 cleanly, unifies metric with SMART):
   3. SMART study under the SAME canonical CLS (his closed_loop_smart_reactive_agents) -> IDM-canonical vs
      SMART-canonical, directly comparable, both field-standard.
 Debug dump in serving/policy_planner.py REVERTED (restored from policy_planner.py.bak). N=5, provisional.
+
+## ADR-087: CANONICAL re-baseline (no new compute) -- mode-selection latent value FLIPS SIGN under the strict metric
+Date: 2026-07-25. Status: headline correction; provisional (confounded + single-seed). Phase 2.
+
+METHOD. Re-aggregated the EXISTING val14_sub300 per-mode(0..5)+det+default-WTA runs (permode_boston_r1,
+boston_zoo_r1) into the CANONICAL nuPlan reactive CLS from their saved per-scenario sub-metrics -- NO new
+sim (ADR-086 fix). canonical_reaggregate.py: CLS=[(5*progress+5*ttc+4*speed+2*comfort)/16] *
+no_ego_at_fault_collisions * drivable_area_compliance * ego_is_making_progress * driving_direction_compliance.
+VALIDATED: xcheck vs the his-fork canonical aggregator (job 8717075, policy_idm_check) = EXACT
+(max|canonical-agg|=0.000000 on all 5 tokens; final 0.3646=0.3646).
+
+RESULT (canonical, n=300):
+  per-mode means: {0:0.078, 1:0.070, 2:0.078, 3:0.076, 4:0.035, 5:0.071}
+  oracle 0.1246  det 0.2517  default-WTA 0.0887  random 0.0680
+  latent value (oracle-det)        -0.1272   (LENIENT ADR-075: +0.091)  <-- SIGN FLIP
+  default-WTA vs det               -0.1631
+  default-WTA vs random            +0.0207
+  frac scenes some mode beats det   0.130     (LENIENT: much higher)
+Ordering under canonical CLS: det(0.25) >> oracle-over-WTA-modes(0.125) > default-WTA(0.089) ~ random(0.068).
+
+INTERPRETATION. Under the strict/canonical metric the WTA modes are individually catastrophic (each
+0.03-0.08; the hard multipliers zero them on off-road/collision), so even a PERFECT selector over the 6
+modes (oracle 0.125) cannot match a single det head (0.252) -> latent value NEGATIVE. The lenient-metric
+story "oracle 0.83 > det 0.74, +0.09 latent value of selection" (ADR-075/058) was substantially a METRIC
+ARTIFACT: default_weighted_average omitted the PDM hard multipliers, so mode constraint-violations were not
+penalized and the multimodal spread looked like upside.
+
+CAVEATS (do NOT overclaim):
+  1. Absolute canonical CLS is low for ALL policies (det 0.25 vs lenient 0.74; PDM ~0.9) -> our models are
+     weak under strict scoring (diffusion/WTA hard-constraint violations; undertraining).
+  2. oracle<det is CONFOUNDED by the ~57x training-budget gap (det ~228k steps vs WTA 4000-step mini-scale).
+     The strict metric amplifies the undertrained WTA's violations. A MATCHED-BUDGET, better-trained WTA is
+     required before concluding the selection bottleneck is genuinely absent.
+  3. n=300, single seed, Boston-trained ckpts on Val14. Provisional.
+
+CONSEQUENCE. (a) All prior lenient CLS numbers (ADR-075 and the mode-selection line) must be reported as
+non-canonical; the canonical numbers above supersede them. (b) The SMART-vs-IDM comparison must use the
+canonical CLS (which it now will -- his SMART/IDM presets already do). (c) Next: cl_corr under canonical
+CLS; then SMART per-mode+det+default-WTA (canonical) on val14_sub300 -> does the (now-negative) selection
+picture persist or shift under realistic SMART agents. Files: nuplan/analysis/canonical_reaggregate.py.
