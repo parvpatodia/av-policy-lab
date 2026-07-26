@@ -2084,3 +2084,32 @@ metric with fair WTA, latent +0.173 (>lenient +0.091), selection ~random -> ADR-
 (-0.058 NS; planner constraint-violations dominate) -> ADR-090 SMART SELECTION: bottleneck persists +
 shifts larger (latent +0.153 IDM -> +0.262 SMART). PAPER-GRADE TODO: multi-seed, full bos/pitt/sg split,
 larger SMART N (>=100 tokens), significance tests. Files: nuplan/slurm/smart_select_canon.sbatch.
+
+## ADR-091: PAPER-GRADE scaling plan + Wave 1 (multi-seed training) launched
+Date: 2026-07-26. Status: paper-grade program START; Wave 1 running (job 8760066). Phase 2 -> paper.
+
+CONTEXT. Phase-2 headline complete + pushed (ADR-086 metric fix; ADR-089 IDM canonical latent +0.173
+bottleneck survives; ADR-088 det IDM-vs-SMART null; ADR-090 SMART selection latent +0.153->+0.262
+persists+larger). All SINGLE-SEED, Boston-trained, sub300 (SMART n=24). Parv authorized paper-grade scaling.
+
+PLAN (waves, dependency-ordered):
+  WAVE 1 (LAUNCHED, job 8760066, gpu array 0-3%4): multi-seed training -- det+WTA at seeds 1,2 on
+    f0_boston, matched 150ep (same recipe as seed0). Outputs {det,wta}_route_seed{1,2}. ~8h. Foundation for
+    across-seed error bars on the primary latent-value/selection claims.
+  WAVE 2 (after W1): multi-seed IDM canonical eval -- per-mode(0..5)+zoo(det+dWTA) canonical on val14_sub300
+    for seeds 1,2 (CPU short partition, reuse permode_boston_matched/boston_zoo_matched recipe w/ seed ckpts
+    + output dirs *_seedN); canonical_reaggregate each -> 3-seed (0,1,2) mean+-std of oracle/det/dWTA/random,
+    latent(orc-det), selection(dWTA-rand). Optional: extend IDM eval to FULL Val14 (1118) not just sub300
+    (cheap CPU, more tokens) for the paper table.
+  WAVE 3 (gpu, after/juxtaposed): larger SMART N -- extend smart_select_canon to n>=100 tokens (seed0
+    first), then seeds 1,2 if GPU budget allows. This is the most compute-heavy (SMART ~8min/scenario, gpu
+    QOS 8submit/4gpu) -> parallelize token-sharded arrays; the n=24 SMART result (ADR-090) is the weakest
+    point and most needs N.
+  WAVE 4: significance/stats -- across-seed mean+-std + bootstrap CIs + paired tests on latent & selection,
+    IDM vs SMART. Cheap analysis on W2/W3 outputs. Then paper-grade results table + writeup.
+  FLAGGED (separate decision, NOT auto-launched): full multi-CITY TRAINING (bos+pitt+singapore) needs a
+    large multi-city f0 feature-extraction + retrain on a different distribution -- a distinct study; the
+    multi-seed Boston result + full-Val14 eval are the priority robustness. Surface to Parv before launching.
+
+RIGOR. All prior single-seed numbers stay provisional until W2/W4 give across-seed error bars. No overclaim.
+Files: nuplan/slurm/train_boston_seed.sbatch. Push manual via blobless mirror (base fc14d2b), author Parv.
