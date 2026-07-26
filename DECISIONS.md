@@ -2013,3 +2013,39 @@ matched-budget WTA retrain (current WTA is 4000-step, budget-confounded ~57x vs 
 value -0.127 is confounded). RECOMMEND to Parv: train a matched-budget WTA (match det's ~228k steps /
 ~150ep, same recipe) before the headline SMART per-mode selection study; the det IDM-vs-SMART point above
 is clean and publishable now. Files: nuplan/slurm/smart_det_canon.sbatch.
+
+## ADR-089: FULL n=300 canonical-matched -- mode-selection bottleneck SURVIVES the honest metric and is LARGER
+Date: 2026-07-25. Status: headline IDM result, FINAL (n=300, single seed). Phase 2.
+
+The clean test: canonical nuPlan reactive CLS (hard multipliers) + the MATCHED-budget WTA (wta_route_seed0,
+150ep) -- both confounds removed at once. Re-aggregated from the freshly-run per-mode(0..5)+det+default-WTA
+matched eval on Val14 sub300 (permode_boston_matched job 8722758 24/24 cells; boston_zoo_matched det+dWTA;
+canonical_reaggregate.py, formula xcheck-exact vs the his-fork canonical aggregator).
+
+THREE-ROW COMPARISON (Val14 sub300, n=300):
+  condition                         oracle  det    dWTA   random  latent(orc-det)  selection(dWTA-rand)
+  lenient-matched (ADR-075)         0.828   0.737  0.777  0.773   +0.091           +0.004
+  canonical-4000step (ADR-087)*     0.125   0.252  0.089  0.068   -0.127           +0.021   (*budget-confounded)
+  canonical-MATCHED (this, n=300)   0.4249  0.2517 0.3036 0.2935  +0.1732          +0.0101
+  per-mode means canonical-matched: {0:.252,1:.244,2:.294,3:.331,4:.345,5:.295}; frac some-mode-beats-det 0.293.
+
+HEADLINE. The mode-selection bottleneck SURVIVES the field-standard (canonical) CLS with a fair
+matched-budget WTA, and is LARGER than the lenient estimate: latent value +0.173 (vs lenient +0.091).
+default-WTA (head-argmax selection, 0.304) sits only +0.010 above random-mode (0.294), leaving +0.121 of
+oracle headroom (0.425) UNREALIZED. i.e. the modes contain large closed-loop value, but the feedforward
+imitation-score selection is ~random at capturing it. This is a CLEANER, STRONGER restatement of ADR-075.
+
+WHY LARGER UNDER THE STRICT METRIC (mechanism). The canonical hard multipliers (no-collision / drivable-
+area / making-progress / direction) are per-scenario 0/1 gates. A single good mode can avoid a hard failure
+that det incurs (off-road/collision), so best-of-modes recovers whole scenarios -> the oracle-det gap is
+AMPLIFIED, not washed out, under strict scoring. The lenient metric (weighted-avg only) muted this.
+
+ADR-087 CORRECTED. Its canonical latent -0.127 was ENTIRELY the ~57x training-budget confound (it used the
+4000-step wta_boston_s4000.pt). With the matched WTA the sign flips back to strongly positive. No
+planner/env/metric problem; just the wrong (undertrained) checkpoint in that one re-aggregation.
+
+CAVEATS. n=300 Val14 sub300, Boston-trained ckpts, SINGLE SEED. The paper-grade version needs bos+pitt+sg
+full split + multi-seed. Provisional but the direction is robust (preview n=75 +0.119, n=150 +0.117, full
+n=300 +0.173 -- all strongly positive). NEXT: SMART selection sweep (job 8725559, 4/8 configs done) ->
+does this +0.173 latent / ~random selection PERSIST or SHIFT under realistic SMART agents (ADR-090).
+Files: nuplan/analysis/canonical_reaggregate.py, nuplan/slurm/{permode_boston_matched,boston_zoo_matched}.sbatch.
