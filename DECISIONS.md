@@ -2049,3 +2049,38 @@ full split + multi-seed. Provisional but the direction is robust (preview n=75 +
 n=300 +0.173 -- all strongly positive). NEXT: SMART selection sweep (job 8725559, 4/8 configs done) ->
 does this +0.173 latent / ~random selection PERSIST or SHIFT under realistic SMART agents (ADR-090).
 Files: nuplan/analysis/canonical_reaggregate.py, nuplan/slurm/{permode_boston_matched,boston_zoo_matched}.sbatch.
+
+## ADR-090: SMART vs IDM SELECTION (canonical, matched WTA) -- bottleneck PERSISTS and SHIFTS LARGER under realistic agents
+Date: 2026-07-26. Status: Phase-2 headline SMART-vs-IDM result (n=24, single seed, provisional). GOAL answered.
+
+SETUP. Per-mode(0..5)+det+default-WTA under Steffen's closed_loop_smart_reactive_agents (SMART learned
+agents; canonical CLS), matched-budget WTA (wta_route_seed0), on the first 24 val14_sub300 tokens (job
+8725559, 8/8 configs). PAIRED against IDM-canonical-matched on the SAME 24 tokens (canonical_reaggregate
+over permode_boston_matched + boston_zoo_matched_r1, intersected).
+
+RESULT (paired, n=24):
+  condition  oracle  det    dWTA   random  latent(orc-det)  selection(dWTA-rand)  frac-beats-det
+  IDM        0.306   0.153  0.240  0.222   +0.153           +0.017                0.25
+  SMART      0.385   0.122  0.228  0.224   +0.262           +0.004                0.33
+  SHIFT (SMART-IDM):                        +0.109          -0.013
+
+HEADLINE (answers the Phase-2 GOAL). The mode-selection bottleneck PERSISTS under realistic SMART reactive
+agents: large positive latent value under BOTH agent models (IDM +0.153, SMART +0.262) with feedforward
+selection ~random under both (IDM +0.017, SMART +0.004 above random-mode). And it SHIFTS LARGER under SMART
+-- latent value +0.109 higher. Mechanism: realistic reactive agents make the single det head fail more
+(det 0.153 -> 0.122) while the best-of-modes oracle rises (0.306 -> 0.385), i.e. realistic interaction
+creates MORE scenarios where a single fixed maneuver fails but some mode succeeds -> multimodality is MORE
+valuable under SMART, and the imitation-score selection still fails to realize it. frac-of-scenes some mode
+beats det: 0.25 (IDM) -> 0.33 (SMART).
+
+CAVEATS (do NOT overclaim). n=24 (small; first-24 val14_sub300), SINGLE SEED, Boston-trained ckpts. The
+IDM row here (latent +0.153 on n=24) is a subset of the full n=300 IDM (latent +0.173, ADR-089) -- same
+ballpark. Deltas are directionally clear and consistent with det IDM-vs-SMART (ADR-088: SMART slightly
+harder for det) but exact magnitudes need larger N + multi-seed before any headline claim.
+
+PHASE-2 ARC COMPLETE (provisional): ADR-086 metric bug (run_cells used the null-multiplier aggregator ->
+inflated lenient CLS; no planner/env bug) -> ADR-089 canonical re-baseline: bottleneck SURVIVES honest
+metric with fair WTA, latent +0.173 (>lenient +0.091), selection ~random -> ADR-088 det IDM-vs-SMART null
+(-0.058 NS; planner constraint-violations dominate) -> ADR-090 SMART SELECTION: bottleneck persists +
+shifts larger (latent +0.153 IDM -> +0.262 SMART). PAPER-GRADE TODO: multi-seed, full bos/pitt/sg split,
+larger SMART N (>=100 tokens), significance tests. Files: nuplan/slurm/smart_select_canon.sbatch.
