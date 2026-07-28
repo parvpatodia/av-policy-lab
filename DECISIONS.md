@@ -2161,3 +2161,42 @@ FILES. Wave1 nuplan/slurm/train_boston_seed.sbatch; Wave2 nuplan/slurm/{permode_
 boston_zoo_matched}_seed{1,2}.sbatch; analysis nuplan/analysis/canonical_reaggregate.py (existing, validated).
 NEXT: ADR-093 (SMART n=72, W3 running) then Wave 4 significance (per-scenario bootstrap CIs + paired
 IDM-vs-SMART) + paper results table.
+
+## ADR-093: SMART reactive-agent bottleneck HOLDS at n=72 (3x ADR-090) -- latent +0.256, larger than IDM
+Date: 2026-07-28. Status: Phase-2 SMART result at larger N, FINAL for seed0/n=72. Provisional (single seed).
+
+SETUP. Extended the ADR-090 SMART selection sweep from n=24 to n=72 by running the 8 configs
+(det, default-WTA, mode0..5) under Steffen's closed_loop_smart_reactive_agents (canonical CLS) on the NEXT
+48 Val14 sub300 tokens (24:72), then unioning with the existing ADR-090 tokens (0:24). All on seed0
+matched-budget ckpts. Analysis: nuplan/analysis/smart_reaggregate.py (VALIDATED: reproduces ADR-090 n=24
+exactly). smart_select_canon_ext.sbatch. Node-variance made this slow (2 configs hit slow-node timeouts and
+were resubmitted; tokens are deterministic so no effect on the numbers).
+
+RESULT (canonical CLS, SMART reactive agents, seed0):
+  N     oracle  det     dWTA    random  latent(orc-det)  selection(dWTA-rand)  frac-some-beats-det
+  24*   0.3846  0.1222  0.2282  0.2243  +0.2624          +0.0039               0.333   (*ADR-090)
+  72    0.3999  0.1440  0.2083  0.2105  +0.2559          -0.0022               0.361
+  per-mode means (n=72): {0:.161, 1:.192, 2:.187, 3:.309, 4:.230, 5:.184}
+
+HEADLINE. The SMART mode-selection bottleneck is STABLE at 3x the sample size. latent value (best-of-6
+oracle minus det) = +0.256 at n=72, essentially unchanged from the n=24 estimate (+0.262). default-WTA
+selection is ~random at both N (n=24 +0.004, n=72 -0.002 -- i.e. the head-argmax captures NONE of the
+oracle headroom, even dips a hair below random-mode). So the ADR-090 SMART picture is not a small-N artifact.
+
+SMART vs IDM (the Phase-2 GOAL). SMART latent +0.256 (n=72) is substantially LARGER than IDM latent
+(ADR-092 across-seed +0.144 +- 0.025; seed0 +0.173). Realistic reactive agents amplify the bottleneck:
+under SMART the single det head collapses to 0.144 (vs IDM det ~0.246 mean) while the best-of-modes oracle
+stays high (0.400), so oracle-det balloons. frac-of-scenes-some-mode-beats-det rises 0.27 (IDM) -> 0.361
+(SMART). Interpretation: realistic interaction creates MORE scenarios where a single fixed maneuver fails
+but some mode succeeds -> multimodality is MORE valuable under SMART, and the feedforward imitation-score
+selection still fails to realize it. This confirms ADR-090's directional finding at larger N.
+
+CAVEATS (do NOT overclaim). SINGLE SEED (seed0) for SMART -- seeds 1,2 SMART not run (would need SMART eval
+on those ckpts; the multi-seed robustness so far is IDM-only, ADR-092). n=72 (< IDM n=300). The SMART-vs-IDM
+magnitude gap here is UNPAIRED (SMART n=72 seed0 vs IDM across-seed/n=300); the rigorous paired same-72-token
+IDM-vs-SMART test + bootstrap CIs are Wave 4. selection -0.002 is ~0 but needs a CI before calling it
+"exactly random". Boston-trained, matched-budget WTA.
+
+NEXT: Wave 4 significance -- per-scenario bootstrap CIs on latent & selection (IDM n=300 seeds0/1/2; SMART
+n=72), paired IDM-vs-SMART on the shared 72 tokens, + paper results table. Files:
+nuplan/analysis/smart_reaggregate.py, nuplan/slurm/smart_select_canon_ext.sbatch.
