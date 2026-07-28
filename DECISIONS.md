@@ -2200,3 +2200,46 @@ IDM-vs-SMART test + bootstrap CIs are Wave 4. selection -0.002 is ~0 but needs a
 NEXT: Wave 4 significance -- per-scenario bootstrap CIs on latent & selection (IDM n=300 seeds0/1/2; SMART
 n=72), paired IDM-vs-SMART on the shared 72 tokens, + paper results table. Files:
 nuplan/analysis/smart_reaggregate.py, nuplan/slurm/smart_select_canon_ext.sbatch.
+
+## ADR-094: Wave 4 SIGNIFICANCE -- bottleneck REAL (CI>0), selection ~random (CI covers 0), SMART amplifies (marginal)
+Date: 2026-07-28. Status: paper-grade significance, FINAL for Boston/IDM-multiseed + SMART-n72. Waves 1-4 COMPLETE.
+
+METHOD. Per-scenario bootstrap (10k resamples over scenarios, 95% percentile CI) on latent value
+(oracle_t = best-of-6-modes minus det_t) and selection (defaultWTA_t minus random_t = per-token mean of the
+6 modes). IDM: seeds 0/1/2 at n=300 + pooled n=900. SMART: seed0 n=72. PAIRED SMART-vs-IDM(seed0) on the
+shared 72 tokens (per-token delta, bootstrap CI + frac). Ran as SLURM job (login-node killed detached runs).
+nuplan/analysis/w4_significance.py; reuses the validated canonical_from_metrics_dir.
+
+RESULTS TABLE (canonical CLS; latent & selection with bootstrap 95% CI):
+  condition       n    oracle  det     dWTA    random  latent (oracle-det)      selection (dWTA-random)
+  IDM seed0       300  0.425   0.252   0.304   0.294   +0.173 [0.122, 0.225]    +0.010 [-0.009, 0.029]
+  IDM seed1       300  0.362   0.229   0.233   0.232   +0.132 [0.085, 0.181]    +0.000 [-0.018, 0.019]
+  IDM seed2       300  0.383   0.257   0.269   0.259   +0.127 [0.074, 0.181]    +0.010 [-0.009, 0.030]
+  IDM pooled      900   -       -       -       -      +0.144 [0.115, 0.174]    +0.007 [-0.004, 0.018]
+  SMART seed0     72   0.400   0.144   0.208   0.211   +0.256 [0.142, 0.372]    -0.002 [-0.046, 0.044]
+  PAIRED SMART-IDM(seed0), shared n=72:  latent delta +0.128 [0.002, 0.252] frac(SMART>IDM)=0.333;
+                                         selection delta +0.019 [-0.036, 0.079] frac>0=0.208
+
+HEADLINE VERDICTS (rigorous).
+1. MODE-SELECTION BOTTLENECK IS REAL. The latent-value 95% CI is strictly ABOVE ZERO in EVERY condition
+   (3 IDM seeds, IDM pooled, SMART). The multimodal closed-loop value is not noise: best-of-modes beats the
+   single det head by a margin that excludes 0 under bootstrap.
+2. FEEDFORWARD SELECTION IS ~RANDOM (confirmed with CIs). The selection 95% CI COVERS ZERO in every
+   condition. default-WTA (head-argmax imitation score) is statistically indistinguishable from picking a
+   uniformly random mode -> it captures ~none of the latent headroom.
+3. SMART AMPLIFIES, BUT ONLY MARGINALLY (do NOT overclaim). Paired SMART-IDM latent delta = +0.128, 95% CI
+   [0.002, 0.252] -- excludes 0, so significant at 95%, but the lower bound is ~0 (borderline). Moreover
+   frac(SMART>IDM)=0.333: SMART's latent exceeds IDM's on only ~1/3 of shared scenarios, so the positive
+   mean is DRIVEN BY A MINORITY of scenarios with large gaps, not a uniform shift. Honest read: realistic
+   reactive agents amplify the bottleneck on average, effect real but fragile/concentrated; larger SMART N
+   and multi-seed SMART would be needed to call it robust.
+
+CAVEATS. Bootstrap is over SCENARIOS (within-condition sampling noise); the across-TRAINING-SEED std is
+ADR-092 (latent +0.144 +- 0.025). SMART is SINGLE seed0, n=72, Boston-trained, matched-budget WTA; IDM is
+n=300. The paired test uses IDM seed0 (matches SMART's seed0). Single city. These bound the claims; the
+direction (bottleneck real, selection random, SMART >= IDM) is consistent across ADR-075/089/090/092/093/094.
+
+PAPER-GRADE PROGRAM COMPLETE (Waves 1-4): W1 multi-seed training; W2/ADR-092 IDM across-seed; W3/ADR-093
+SMART n=72; W4/ADR-094 significance. REMAINING (separate study, FLAGGED, needs sign-off): full bos+pitt+sg
+multi-city training + eval, and multi-seed SMART. Files: nuplan/analysis/w4_significance.py,
+nuplan/slurm/w4_sig.sbatch.
