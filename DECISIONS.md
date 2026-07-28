@@ -2113,3 +2113,51 @@ PLAN (waves, dependency-ordered):
 
 RIGOR. All prior single-seed numbers stay provisional until W2/W4 give across-seed error bars. No overclaim.
 Files: nuplan/slurm/train_boston_seed.sbatch. Push manual via blobless mirror (base fc14d2b), author Parv.
+
+## ADR-092: MULTI-SEED (paper-grade) -- mode-selection bottleneck HOLDS across 3 training seeds
+Date: 2026-07-27. Status: paper-grade across-seed robustness result, FINAL for IDM/Boston/n=300. Phase 2 -> paper.
+
+SETUP. Wave 1 trained det+WTA at seeds 1,2 on f0_boston, matched 150-epoch budget, same recipe as seed0
+(train_boston_seed.sbatch; all reached epoch 150, verified). Wave 2 ran the IDM canonical eval for each new
+seed: per-mode(0..5)+det+default-WTA on Val14 sub300 (n=300), canonical nuPlan reactive CLS (hard
+multipliers), matched-budget WTA best.pt. canonical_reaggregate.py per seed (VALIDATED: reproduces seed0
+ADR-089 exactly, latent +0.1732). This turns the single-seed ADR-089 headline into a 3-seed mean+-std.
+
+RESULT (canonical CLS, Val14 sub300 n=300, IDM reactive agents; per seed):
+  seed  oracle  det     dWTA    random  latent(orc-det)  selection(dWTA-rand)  frac-some-mode-beats-det
+  0     0.4249  0.2517  0.3036  0.2935  +0.1732          +0.0101               0.293
+  1     0.3615  0.2291  0.2326  0.2324  +0.1324          +0.0003               0.263
+  2     0.3834  0.2568  0.2689  0.2588  +0.1266          +0.0100               0.270
+  ---------------------------------------------------------------------------------------------
+  mean  0.3899  0.2459  0.2684  0.2616  +0.1441          +0.0068
+  sd    0.0322  0.0147  0.0355  0.0306  +-0.0254         +-0.0056     (sample sd, ddof=1, across seeds)
+
+HEADLINE (paper-grade). The mode-selection bottleneck SURVIVES the multi-seed check. (1) The latent
+multimodal value (best-of-6-modes oracle minus the single det head) is strongly positive in EVERY seed:
++0.173 / +0.132 / +0.127, mean +0.144 +- 0.025, min +0.127 -- far from zero. (2) The feedforward
+imitation-score selection (default-WTA head-argmax minus random-mode) is ~zero in EVERY seed: +0.010 /
++0.000 / +0.010, mean +0.007 +- 0.006. So BOTH halves of the ADR-089/075 claim are seed-robust: large
+unrealized multimodal closed-loop value, and a feedforward head that captures essentially none of it.
+
+HONEST CORRECTION TO THE SINGLE-SEED NUMBER. seed0 (ADR-089, +0.173) was the HIGHEST of the three, not
+representative. The honest across-seed latent value is +0.144 +- 0.025, ~17% below the seed0 point estimate.
+The DIRECTION and magnitude-class are robust; the single-seed figure modestly over-stated the effect size.
+Report +0.144 +- 0.025 as the headline going forward, not +0.173.
+
+CAVEATS (do NOT overclaim). Single city (Boston-trained), n=300 (Val14 sub300), IDM reactive agents,
+matched-budget WTA (150ep). The +-sd is across 3 TRAINING seeds on the SAME eval set (captures training
+stochasticity) -- it is NOT a per-scenario bootstrap CI (that is Wave 4) and 3 seeds is a small sample for a
+std. wta_route_seed0 latest.pt was epoch 149 vs 150 for seeds 1,2, but best.pt is min-ADE-selected across
+all epochs, so the 1-epoch difference is immaterial. SMART-agent (realistic) version is Wave 3 (n=72,
+running, job 8787149) -> ADR-093. Full bos/pitt/sg multi-city training is a separate study (flagged, not run).
+
+INFRA BUGS FIXED THIS RUN (none affect the numbers above). (1) Monitoring used relative sim_results/ globs
+after cd into the repo (no repo-local sim_results) -> silent 0-counts; fixed to absolute /scratch paths.
+(2+3) smart_select_canon_ext token builder: unquoted tokens -> hydra parsed 0e80...-style tokens as floats;
+then bash ate the double-quotes inside python -c "..." -> empty token list. Fixed to quote-free
+json.dumps(t[24:72]); bash-verified emits a valid 48-token quoted JSON list.
+
+FILES. Wave1 nuplan/slurm/train_boston_seed.sbatch; Wave2 nuplan/slurm/{permode_boston_matched,
+boston_zoo_matched}_seed{1,2}.sbatch; analysis nuplan/analysis/canonical_reaggregate.py (existing, validated).
+NEXT: ADR-093 (SMART n=72, W3 running) then Wave 4 significance (per-scenario bootstrap CIs + paired
+IDM-vs-SMART) + paper results table.
