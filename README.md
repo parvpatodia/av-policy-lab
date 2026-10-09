@@ -37,11 +37,36 @@ evaluate closed-loop:
   encroachment gaps, crosswalk geometry). Never from either model's output,
   so the moderation claim is not circular. Spec with verified citations:
   [docs/frontier/F4_SPEC.md](docs/frontier/F4_SPEC.md).
-- Third axis (in progress): repeat the comparison with learned reactive
-  background agents (SMART, warm-started from NVIDIA CAT-K checkpoints)
-  instead of rule-based IDM, testing whether the conclusion itself flips.
+- Third axis: repeat the comparison with learned reactive background agents
+  (SMART, warm-started from NVIDIA CAT-K checkpoints) instead of rule-based
+  IDM, testing whether the conclusion itself flips.
   Motivated by Hagedorn et al. (arXiv:2510.14677), who showed IDM agents
   inflate nuPlan scores and reshuffle planner rankings.
+
+## Results
+
+Both results are closed-loop on nuPlan, scored with the canonical closed-loop
+score (CLS).
+
+**1. The moderation hypothesis is null, and the write-up explains why.**
+[docs/frontier/PAPER.md](docs/frontier/PAPER.md). Pre-registered 2x2, 3 seeds,
+N=800 scenarios, non-reactive and reactive (IDM) traffic. The diffusion
+advantage does not grow with interaction-criticality (TOST-equivalent to zero
+in non-reactive mode). Under single-future imitation the diffusion policy
+collapses to a near-deterministic one (median 0.47 m from the deterministic
+policy); a synthetic bimodal positive control shows the head itself is fine; a
+winner-take-all fix widens the prediction without splitting it; and the
+standard CLS outcomes are heavily saturated.
+
+**2. The bottleneck is mode selection.** [DECISIONS.md](DECISIONS.md),
+ADR-089 to ADR-094. For a 6-mode multi-hypothesis policy, picking the best of
+its modes beats the single deterministic head by **+0.144 +- 0.025 CLS**
+across 3 training seeds (IDM agents, n=300 scenarios per seed; pooled
+bootstrap 95% CI [0.115, 0.174]). The policy's own mode choice is no better
+than picking a mode at random: +0.007, CI [-0.004, 0.018].
+Under learned SMART agents (seed 0, n=72) the gap rises to +0.256, CI
+[0.142, 0.372]. The paired SMART-minus-IDM difference, +0.128 [0.002, 0.252],
+is borderline and comes from about a third of scenarios.
 
 ## Status
 
@@ -51,17 +76,18 @@ Done and tested:
 - F1: Wayformer-style scene encoder, 1.03M params, 32 latent queries.
 - F2/F3: goal conditioning + capacity-matched twin heads (5.4% param gap,
   shared trajectory trunk, x0-parameterized diffusion, cosine schedule).
+- F4: interaction-criticality score (v1.2), frozen and hashed before any
+  closed-loop score was seen.
 - F5: training loop with bit-exact checkpoint resume, DDIM sampler,
   deterministic train/val shard split. 146 tests pass.
-- F4 (partial): shard-side interaction score components.
+- The four training cells and their closed-loop evaluation (result 1).
+- Diagnostics: collapse probe, bimodal positive control, winner-take-all
+  head, metric saturation, and a reward-guided RL recipe (PAPER.md section 8).
+- SMART reactive-agent integration and the mode-selection study (result 2).
 
-Running now:
-- The four training cells on HPC GPUs (SLURM array).
-
-Not built yet:
-- F4 map-API branching score and the score-to-scenario join.
-- Closed-loop evaluation harness for the trained heads.
-- SMART agent integration (checkpoints in hand, port not started).
+Open:
+- Multi-seed SMART evaluation (SMART results are seed 0 only).
+- Multi-city training and evaluation (all results are Boston-trained).
 
 Earlier phases (BC, DAgger, BEV CNN, MILE world model, goal-representation
 ablations) live in the notebooks and [docs/](docs/); their results stand but
